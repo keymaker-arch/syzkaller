@@ -143,6 +143,11 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 }
 
 // nolint: funlen
+/*
+	KEYMAKER: this is the syz-fuzzer which runs inside the VM instance
+	it generates syscall sequences(by generating new ones or by mutating an exsiting one) and pass them to the syz-executor
+	syz-executor source file is executor/executor.cc, it is written in C
+*/
 func main() {
 	debug.SetGCPercent(50)
 
@@ -300,6 +305,7 @@ func main() {
 		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter
 	}
 
+	// KEYMAKER: create inner representation for each syz-executor process
 	log.Logf(0, "starting %v fuzzer processes", *flagProcs)
 	for pid := 0; pid < *flagProcs; pid++ {
 		proc, err := newProc(fuzzer, pid)
@@ -307,6 +313,7 @@ func main() {
 			log.Fatalf("failed to create proc: %v", err)
 		}
 		fuzzer.procs = append(fuzzer.procs, proc)
+		// KEYMAKER: start syz-executor process here
 		go proc.loop()
 	}
 

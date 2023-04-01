@@ -558,6 +558,11 @@ func (pool *ResourcePool) TakeOne() *int {
 	return &ret[0]
 }
 
+/*
+KEYMAKER: this function is invoked during syz-manager startup to load existing corpus
+And files in syzkaller_base_path/sys/linux/test/* will be used as seed programs
+TODO: add a seed file to help syzkaller establish a TCP connection
+*/
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, "corpus.db"), true)

@@ -3973,6 +3973,7 @@ static void drop_caps(void)
 #include <sched.h>
 #include <sys/types.h>
 
+// KEYMAKER: in linux, this function executes the syscall sequence received from syz-fuzzer
 static int do_sandbox_none(void)
 {
 	// CLONE_NEWPID takes effect for the first child of the current process,
@@ -4015,6 +4016,8 @@ static int do_sandbox_none(void)
 	initialize_wifi_devices();
 #endif
 	setup_binderfs();
+
+	// KEYMAKER: environment is now setup, start executing here
 	loop();
 	doexit(1);
 }

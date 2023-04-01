@@ -415,6 +415,11 @@ static void setup_features(char** enable, int n);
 static uint64 sandbox_arg = 0;
 #endif
 
+/*
+	KEYMAKER: this is the implementation of syz-executor
+	It is invoked from syz-fuzzer/proc.go:executeRaw()
+	It accepts the encoded syscall sequence sent by syz-fuzzer, decode them to the standard C form syscall and then invoke them one by one
+*/
 int main(int argc, char** argv)
 {
 	if (argc == 2 && strcmp(argv[1], "version") == 0) {
@@ -482,6 +487,7 @@ int main(int argc, char** argv)
 #if SYZ_EXECUTOR_USES_FORK_SERVER
 	receive_handshake();
 #else
+	// KEYMAKER: this function receives the encoded syscall sequence sent by syz-fuzzer
 	receive_execute();
 #endif
 	if (flag_coverage) {
@@ -522,9 +528,10 @@ int main(int argc, char** argv)
 		init_coverage_filter(filename);
 	}
 
+// KEYMAKER: these are the functions to execute the received syscall sequences
 	int status = 0;
 	if (flag_sandbox_none)
-		status = do_sandbox_none();
+		status = do_sandbox_none();  // KEYMAKER: the executing function was implemented on each platform
 #if SYZ_HAVE_SANDBOX_SETUID
 	else if (flag_sandbox_setuid)
 		status = do_sandbox_setuid();
@@ -746,6 +753,10 @@ void realloc_output_data()
 #endif // if SYZ_EXECUTOR_USES_SHMEM
 
 // execute_one executes program stored in input_data.
+/*
+	KEYMAKER: this one is the final final function that actually do the executing,
+	it parses the syscall sequences in the input_data buffer, decode then execute, collect coverage info and write back the execution result
+*/
 void execute_one()
 {
 #if SYZ_EXECUTOR_USES_SHMEM

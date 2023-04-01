@@ -84,6 +84,7 @@ func (proc *Proc) loop() {
 
 		ct := proc.fuzzer.choiceTable
 		fuzzerSnapshot := proc.fuzzer.snapshot()
+		// KEYMAKER: generate a new syscall sequence or mutate an existing one then execute
 		if len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0 {
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
@@ -280,7 +281,9 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
+// KEYMAKER: execute the new syscall sequence, inner representation prog.Prog
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
+	// KEYMAKER: this is the function that actually do the job
 	proc.execute(execOpts, p, flags, stat)
 
 	if proc.execOptsCollide.Flags&ipc.FlagThreaded == 0 {
