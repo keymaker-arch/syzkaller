@@ -247,6 +247,9 @@ func (env *Env) Close() error {
 
 var rateLimit = time.NewTicker(1 * time.Second)
 
+/*
+	KEYMAKER: this is the bottom function in GO world to execute a program
+*/
 // Exec starts executor binary to execute program p and returns information about the execution:
 // output: process output
 // info: per-call info
@@ -254,7 +257,7 @@ var rateLimit = time.NewTicker(1 * time.Second)
 // err0: failed to start the process or bug in executor itself.
 func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInfo, hanged bool, err0 error) {
 	// Copy-in serialized program.
-	progSize, err := p.SerializeForExec(env.in)
+	progSize, err := p.SerializeForExec(env.in) // KEYMAKER: the serialized program is written to env.in
 	if err != nil {
 		err0 = err
 		return
@@ -283,14 +286,14 @@ func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInf
 			return
 		}
 	}
-	output, hanged, err0 = env.cmd.exec(opts, progData)
+	output, hanged, err0 = env.cmd.exec(opts, progData) // KEYMAKER: invoke the syz-executor to execute the syscall sequence
 	if err0 != nil {
 		env.cmd.close()
 		env.cmd = nil
 		return
 	}
 
-	info, err0 = env.parseOutput(p, opts)
+	info, err0 = env.parseOutput(p, opts) // KEYMAKER: parse the output, return struct ProgInfo about the execution result
 	if info != nil && env.config.Flags&FlagSignal == 0 {
 		addFallbackSignal(p, info)
 	}

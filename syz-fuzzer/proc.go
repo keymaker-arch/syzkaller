@@ -281,7 +281,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
-// KEYMAKER: execute the new syscall sequence, inner representation prog.Prog
+// KEYMAKER: execute the new syscall sequence(the inner representation prog.Prog)
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
 	// KEYMAKER: this is the function that actually do the job
 	proc.execute(execOpts, p, flags, stat)
@@ -318,6 +318,7 @@ func (proc *Proc) randomCollide(origP *prog.Prog) *prog.Prog {
 	return p
 }
 
+// KEYMAKER: execute a program, and return the execution result
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
 	proc.fuzzer.checkDisabledCalls(p)
 
@@ -325,10 +326,10 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 	ticket := proc.fuzzer.gate.Enter()
 	defer proc.fuzzer.gate.Leave(ticket)
 
-	proc.logProgram(opts, p)
+	proc.logProgram(opts, p) // KEYMAKER: write the info of this program to the console, so we can still get info in case this program crashes the kernel
 	for try := 0; ; try++ {
 		atomic.AddUint64(&proc.fuzzer.stats[stat], 1)
-		output, info, hanged, err := proc.env.Exec(opts, p)
+		output, info, hanged, err := proc.env.Exec(opts, p) // KEYMAKER: execute the program here
 		if err != nil {
 			if err == prog.ErrExecBufferTooSmall {
 				// It's bad if we systematically fail to serialize programs,

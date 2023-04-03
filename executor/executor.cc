@@ -490,6 +490,8 @@ int main(int argc, char** argv)
 	// KEYMAKER: this function receives the encoded syscall sequence sent by syz-fuzzer
 	receive_execute();
 #endif
+
+	// KEYMAKER: setup KCOV for coverage collection
 	if (flag_coverage) {
 		int create_count = kCoverDefaultCount, mmap_count = create_count;
 		if (flag_delay_kcov_mmap) {
@@ -528,7 +530,7 @@ int main(int argc, char** argv)
 		init_coverage_filter(filename);
 	}
 
-// KEYMAKER: these are the functions to execute the received syscall sequences
+// KEYMAKER: these are the functions to execute the received syscall sequence
 	int status = 0;
 	if (flag_sandbox_none)
 		status = do_sandbox_none();  // KEYMAKER: the executing function was implemented on each platform
@@ -754,7 +756,7 @@ void realloc_output_data()
 
 // execute_one executes program stored in input_data.
 /*
-	KEYMAKER: this one is the final final function that actually do the executing,
+	KEYMAKER: this one is the final final(in the whole Syzkaller) function that actually do the executing,
 	it parses the syscall sequences in the input_data buffer, decode then execute, collect coverage info and write back the execution result
 */
 void execute_one()
@@ -780,6 +782,7 @@ void execute_one()
 	call_props_t call_props;
 	memset(&call_props, 0, sizeof(call_props));
 
+	// KEYMAKER: parse the syscall sequence in input_data, translate them, execute then collect coverage one by one
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
 		if (call_num == instr_eof)
@@ -923,9 +926,9 @@ void execute_one()
 			if (th != &threads[0])
 				fail("using non-main thread in non-thread mode");
 			event_reset(&th->ready);
-			execute_call(th);
+			execute_call(th);  // KEYMAKER: if the call wants to be executed directly, not in async form. Coverage was collected after the call, and written to th->cov
 			event_set(&th->done);
-			handle_completion(th);
+			handle_completion(th);  // KEYMAKER: handel execution completion: write back syscall execution return value and coverage info
 		}
 		memset(&call_props, 0, sizeof(call_props));
 	}
