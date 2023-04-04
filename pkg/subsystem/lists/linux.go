@@ -1864,9 +1864,10 @@ func subsystems_linux() []*Subsystem {
 	}
 
 	input = Subsystem{
-		Name:    "input",
-		Lists:   []string{"linux-input@vger.kernel.org"},
-		Parents: []*Subsystem{&kernel},
+		Name:     "input",
+		Syscalls: []string{"syz_usb_connect$hid"},
+		Lists:    []string{"linux-input@vger.kernel.org"},
+		Parents:  []*Subsystem{&kernel},
 		PathRules: []PathRule{
 			{IncludeRegexp: "^drivers/hid/amd-sfh-hid/"},
 			{IncludeRegexp: "^drivers/hid/hid-creative-sb0540\\.c$"},
@@ -3203,6 +3204,7 @@ func subsystems_linux() []*Subsystem {
 
 	nilfs = Subsystem{
 		Name:        "nilfs",
+		Syscalls:    []string{"syz_mount_image$nilfs2"},
 		Lists:       []string{"linux-nilfs@vger.kernel.org"},
 		Maintainers: []string{"konishi.ryusuke@gmail.com"},
 		Parents:     []*Subsystem{&fs},
@@ -4264,9 +4266,10 @@ func subsystems_linux() []*Subsystem {
 	}
 
 	usb = Subsystem{
-		Name:    "usb",
-		Lists:   []string{"linux-usb@vger.kernel.org"},
-		Parents: []*Subsystem{&kernel},
+		Name:     "usb",
+		Syscalls: []string{"syz_usb_connect", "syz_usb_connect$hid", "syz_usb_connect$printer", "syz_usb_connect$cdc_ecm", "syz_usb_connect$cdc_ncm", "syz_usb_connect$uac1"},
+		Lists:    []string{"linux-usb@vger.kernel.org"},
+		Parents:  []*Subsystem{&kernel},
 		PathRules: []PathRule{
 			{IncludeRegexp: "^arch/arm/[^/]*omap[^/]*/usb[^/]*$|^drivers/usb/[^/]*/[^/]*omap[^/]*$"},
 			{IncludeRegexp: "^drivers/hid/usbhid/"},
