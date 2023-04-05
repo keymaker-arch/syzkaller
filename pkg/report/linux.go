@@ -67,6 +67,7 @@ func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 		regexp.MustCompile(`^kernel/kcov.c`),
 		regexp.MustCompile(`^mm/sl.b.c`),
 		regexp.MustCompile(`^mm/filemap.c`),
+		regexp.MustCompile(`^mm/folio-compat.c`),
 		regexp.MustCompile(`^mm/truncate.c`),
 		regexp.MustCompile(`^mm/memory.c`),
 		regexp.MustCompile(`^mm/percpu.*`),
@@ -76,6 +77,7 @@ func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 		regexp.MustCompile(`^mm/util.c`),
 		regexp.MustCompile(`^kernel/rcu/.*`),
 		regexp.MustCompile(`^arch/.*/kernel/traps.c`),
+		regexp.MustCompile(`^arch/.*/kernel/unwind.*.c`),
 		regexp.MustCompile(`^arch/.*/mm/fault.c`),
 		regexp.MustCompile(`^arch/.*/mm/physaddr.c`),
 		regexp.MustCompile(`^arch/.*/kernel/stacktrace.c`),
@@ -88,6 +90,7 @@ func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 		regexp.MustCompile(`^kernel/softirq.c`),
 		regexp.MustCompile(`^kernel/kthread.c`),
 		regexp.MustCompile(`^kernel/sched/.*.c`),
+		regexp.MustCompile(`^kernel/stacktrace.c`),
 		regexp.MustCompile(`^kernel/time/timer.c`),
 		regexp.MustCompile(`^kernel/workqueue.c`),
 		regexp.MustCompile(`^net/core/dev.c`),
@@ -1234,6 +1237,7 @@ var linuxStackParams = &stackParams{
 		"print_hex_dump",
 		"^klist_",
 		"(trace|lockdep)_(hard|soft)irq",
+		"^(un)?lock_page",
 	},
 	corruptedLines: []*regexp.Regexp{
 		// Fault injection stacks are frequently intermixed with crash reports.
