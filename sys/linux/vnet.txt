@@ -6,6 +6,18 @@ include <linux/byteorder/generic.h>
 
 syz_emit_ethernet(len len[packet], packet ptr[in, eth_packet], frags ptr[in, vnet_fragmentation, opt])
 
+#syz_emit_ethernet$tcp(len len[packet], packet ptr[in, eth_ipv4_tcp_packet], frags ptr[in, vnet_fragmentation, opt])
+#eth_ipv4_tcp_packet {
+#  dst_mac	mac_addr
+#	src_mac	mac_addr
+#	vtag	optional[vlan_tag]
+#  eth_payload ipv4_tcp_packet
+#} [packed]
+
+#ipv4_tcp_packet {
+#  packet_data ipv4_packet_t[const[IPPROTO_TCP, int8], tcp_packet]
+#} [packed]
+
 vnet_fragmentation {
 # If set and we have remaining data after fragmentation, it is written in an additional fragment.
 # If not set, data remaining after fragmentation is discarded.
