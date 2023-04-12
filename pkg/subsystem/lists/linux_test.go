@@ -95,7 +95,113 @@ syz_usb_connect(0x0, 0x24, &(0x7f0000000140)=ANY=[@ANYBLOB="12010000abbe6740e917
 `),
 				},
 			},
-			expect: []string{"dri"},
+			expect: []string{"dri", "usb"},
+		},
+		{
+			name: "ntfs bug with one ntfs guilty path",
+			crashes: []*subsystem.Crash{
+				{
+					GuiltyPath: `mm/folio-compat.c`,
+				},
+				{
+					GuiltyPath: `mm/folio-compat.c`,
+				},
+				{
+					GuiltyPath: `mm/folio-compat.c`,
+				},
+				{
+					// By chance just one was correct.
+					GuiltyPath: `fs/ntfs3/frecord.c`,
+					SyzRepro: []byte(`
+# https://syzkaller.appspot.com/bug?id=9a239048a7fff1d8d9b276b240522a2293468dba
+# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
+#{"procs":1,"slowdown":1,"sandbox":"","sandbox_arg":0,"close_fds":false}
+syz_mount_image$ntfs3(&(0x7f000001f740), &(0x7f000001f780)='./file0\x00', 0x0, &(0x7f0000000200)=ANY=[@ANYBLOB="64697363==")
+`),
+				},
+				{
+					GuiltyPath: `mm/folio-compat.c`,
+					SyzRepro: []byte(`
+# https://syzkaller.appspot.com/bug?id=56e9aec9bc3b5378c9b231a3f4b3329cf9f80990
+# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
+#{"procs":1,"slowdown":1,"sandbox":"none","sandbox_arg":0,"tun":true,"netdev":true,"close_fds":true}
+syz_mount_image$ntfs3(&(0x7f000001f740), &(0x7f000001f780)='./file0\x00', 0x0, &(0x7f0000000200)=ANY=[@ANYBLOB="64697363==")
+`),
+				},
+			},
+			expect: []string{"ntfs3"},
+		},
+		{
+			name: "many repros point to ntfs, all guilty files are wrong",
+			crashes: []*subsystem.Crash{
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+				},
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+				},
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+				},
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+					SyzRepro: []byte(`
+syz_mount_image$ntfs3(&(0x7f000001f740), &(0x7f000001f780)='./file0\x00', 0x0, &(0x7f0000000200)=ANY=[@ANYBLOB="64697363==")
+`),
+				},
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+					SyzRepro: []byte(`
+syz_mount_image$ntfs3(&(0x7f000001f740), &(0x7f000001f780)='./file0\x00', 0x0, &(0x7f0000000200)=ANY=[@ANYBLOB="64697363==")
+`),
+				},
+				{
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+					SyzRepro: []byte(`
+syz_mount_image$ntfs3(&(0x7f000001f740), &(0x7f000001f780)='./file0\x00', 0x0, &(0x7f0000000200)=ANY=[@ANYBLOB="64697363==")
+`),
+				},
+			},
+			// "arm" is just too omnipresent, we have to mention it.
+			expect: []string{"ntfs3", "arm"},
+		},
+		{
+			name: "guilty files point to media, many repros to usb",
+			crashes: []*subsystem.Crash{
+				{
+					// Suppose, in one case report parsing failed.
+					GuiltyPath: `arch/arm64/kernel/stacktrace.c`,
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+					SyzRepro: []byte(`
+syz_usb_connect(0x0, 0x58, &(0x7f0000000100)=ANY=[@ANYBLOB="1201000036ee3808d30b55056"])
+`),
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+					SyzRepro: []byte(`
+syz_usb_connect(0x0, 0x58, &(0x7f0000000100)=ANY=[@ANYBLOB="1201000036ee3808d30b55056"])
+`),
+				},
+				{
+					GuiltyPath: `drivers/media/mc/mc-entity.c`,
+					SyzRepro: []byte(`
+syz_usb_connect(0x0, 0x58, &(0x7f0000000100)=ANY=[@ANYBLOB="1201000036ee3808d30b55056"])
+`),
+				},
+			},
+			// "media" is picked because it's in >= 2/3 guilty paths.
+			expect: []string{"media", "usb"},
 		},
 	}
 	for _, test := range tests {

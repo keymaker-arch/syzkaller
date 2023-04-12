@@ -421,28 +421,52 @@ func generateEmailBugTitle(rep *dashapi.BugReport, emailConfig *EmailConfig) str
 // handleIncomingMail is the entry point for incoming emails.
 func handleIncomingMail(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
-	if err := incomingMail(c, r); err != nil {
-		log.Errorf(c, "handleIncomingMail: %v", err)
+	url := r.URL.RequestURI()
+	myEmail := ""
+	if index := strings.LastIndex(url, "/"); index >= 0 {
+		myEmail = url[index+1:]
+	} else {
+		log.Errorf(c, "invalid email handler URL: %s", url)
+		return
 	}
-}
-
-// nolint: gocyclo
-func incomingMail(c context.Context, r *http.Request) error {
-	msg, err := email.Parse(r.Body, ownEmails(c), ownMailingLists())
+	source := dashapi.NoDiscussion
+	for _, item := range config.DiscussionEmails {
+		if item.ReceiveAddress != myEmail {
+			continue
+		}
+		source = item.Source
+		break
+	}
+	msg, err := email.Parse(r.Body, ownEmails(c), ownMailingLists(), []string{
+		appURL(c),
+	})
 	if err != nil {
 		// Malformed emails constantly appear from spammers.
 		// But we have not seen errors parsing legit emails.
 		// These errors are annoying. Warn and ignore them.
 		log.Warningf(c, "failed to parse email: %v", err)
-		return nil
+		return
 	}
+	log.Infof(c, "received email at %q, source %q", myEmail, source)
+	if source == dashapi.NoDiscussion {
+		err = processIncomingEmail(c, msg)
+	} else {
+		err = processDiscussionEmail(c, msg, source)
+	}
+	if err != nil {
+		log.Errorf(c, "email processing failed: %s", err)
+	}
+}
+
+// nolint: gocyclo
+func processIncomingEmail(c context.Context, msg *email.Email) error {
 	// Ignore any incoming emails from syzbot itself.
 	if ownEmail(c) == msg.Author {
 		// But we still want to remember the id of our own message, so just neutralize the command.
 		msg.Command, msg.CommandArgs = email.CmdNone, ""
 	}
-	log.Infof(c, "received email: subject %q, author %q, cc %q, msg %q, bug %q, cmd %q, link %q, list %q",
-		msg.Subject, msg.Author, msg.Cc, msg.MessageID, msg.BugID, msg.Command, msg.Link, msg.MailingList)
+	log.Infof(c, "received email: subject %q, author %q, cc %q, msg %q, bug %v, cmd %q, link %q, list %q",
+		msg.Subject, msg.Author, msg.Cc, msg.MessageID, msg.BugIDs, msg.Command, msg.Link, msg.MailingList)
 	if msg.Command == email.CmdFix && msg.CommandArgs == "exact-commit-title" {
 		// Sometimes it happens that somebody sends us our own text back, ignore it.
 		msg.Command, msg.CommandArgs = email.CmdNone, ""
@@ -457,7 +481,7 @@ func incomingMail(c context.Context, r *http.Request) error {
 	mailingList := email.CanonicalEmail(emailConfig.Email)
 	mailingListInCC := checkMailingListInCC(c, msg, mailingList)
 	log.Infof(c, "from/cc mailing list: %v/%v", fromMailingList, mailingListInCC)
-	if fromMailingList && msg.BugID != "" && msg.Command != email.CmdNone {
+	if fromMailingList && len(msg.BugIDs) > 0 && msg.Command != email.CmdNone {
 		// Note that if syzbot was not directly mentioned in To or Cc, this is not really
 		// a duplicate message, so it must be processed. We detect it by looking at BugID.
 
@@ -516,6 +540,48 @@ func incomingMail(c context.Context, r *http.Request) error {
 	}
 	if !mailingListInCC && msg.Command != email.CmdNone && msg.Command != email.CmdUnCC {
 		warnMailingListInCC(c, msg, bugID, mailingList)
+	}
+	return nil
+}
+
+func processDiscussionEmail(c context.Context, msg *email.Email, source dashapi.DiscussionSource) error {
+	log.Debugf(c, "processDiscussionEmail: %#v, source %v", msg, source)
+	if len(msg.BugIDs) == 0 {
+		return nil
+	}
+	const limitIDs = 10
+	if len(msg.BugIDs) > limitIDs {
+		msg.BugIDs = msg.BugIDs[:limitIDs]
+	}
+	log.Infof(c, "saving to discussions for %q", msg.BugIDs)
+	// This is very crude, but should work for now.
+	dType := dashapi.DiscussionReport
+	if strings.Contains(msg.Subject, "PATCH") {
+		dType = dashapi.DiscussionPatch
+	}
+	extIDs := []string{}
+	for _, id := range msg.BugIDs {
+		_, _, err := findBugByReportingID(c, id)
+		if err == nil {
+			extIDs = append(extIDs, id)
+		}
+	}
+	if len(extIDs) == 0 {
+		log.Infof(c, "filtered all extIDs out")
+		return nil
+	}
+	err := saveDiscussionMessage(c, &newDiscussionMessage{
+		id:        msg.MessageID,
+		subject:   msg.Subject,
+		msgSource: source,
+		msgType:   dType,
+		bugIDs:    extIDs,
+		inReplyTo: msg.InReplyTo,
+		external:  ownEmail(c) != msg.Author,
+		time:      msg.Date,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to save in discussions: %v", err)
 	}
 	return nil
 }
@@ -678,14 +744,19 @@ type bugListInfoResult struct {
 
 func identifyEmail(c context.Context, msg *email.Email) (
 	*bugInfoResult, *bugListInfoResult, *EmailConfig) {
-	if isBugListHash(msg.BugID) {
-		subsystem, _, stage, err := findSubsystemReportByID(c, msg.BugID)
+	bugID := ""
+	if len(msg.BugIDs) > 0 {
+		// For now let's only consider one of them.
+		bugID = msg.BugIDs[0]
+	}
+	if isBugListHash(bugID) {
+		subsystem, _, stage, err := findSubsystemReportByID(c, bugID)
 		if err != nil {
 			log.Errorf(c, "findBugListByID failed: %s", err)
 			return nil, nil, nil
 		}
 		if subsystem == nil {
-			log.Errorf(c, "no bug list with the %v ID found", msg.BugID)
+			log.Errorf(c, "no bug list with the %v ID found", bugID)
 			return nil, nil, nil
 		}
 		reminderConfig := config.Namespaces[subsystem.Namespace].Subsystems.Reminder
@@ -695,10 +766,10 @@ func identifyEmail(c context.Context, msg *email.Email) (
 		}
 		emailConfig, ok := bugListReportingConfig(subsystem.Namespace, stage).(*EmailConfig)
 		if !ok {
-			log.Errorf(c, "bug list's reporting config is not EmailConfig (id=%v)", msg.BugID)
+			log.Errorf(c, "bug list's reporting config is not EmailConfig (id=%v)", bugID)
 			return nil, nil, nil
 		}
-		return nil, &bugListInfoResult{id: msg.BugID, config: emailConfig}, emailConfig
+		return nil, &bugListInfoResult{id: bugID, config: emailConfig}, emailConfig
 	}
 	bugInfo := loadBugInfo(c, msg)
 	if bugInfo == nil {
@@ -715,7 +786,12 @@ type bugInfoResult struct {
 }
 
 func loadBugInfo(c context.Context, msg *email.Email) *bugInfoResult {
-	if msg.BugID == "" {
+	bugID := ""
+	if len(msg.BugIDs) > 0 {
+		// For now let's only consider one of them.
+		bugID = msg.BugIDs[0]
+	}
+	if bugID == "" {
 		var matchingErr error
 		// Give it one more try -- maybe we can determine the bug from the subject + mailing list.
 		if msg.MailingList != "" {
@@ -746,7 +822,7 @@ func loadBugInfo(c context.Context, msg *email.Email) *bugInfoResult {
 		}
 		return nil
 	}
-	bug, bugKey, err := findBugByReportingID(c, msg.BugID)
+	bug, bugKey, err := findBugByReportingID(c, bugID)
 	if err != nil {
 		log.Errorf(c, "can't find bug: %v", err)
 		from, err := email.AddAddrContext(ownEmail(c), "HASH")
@@ -759,7 +835,7 @@ func loadBugInfo(c context.Context, msg *email.Email) *bugInfoResult {
 		}
 		return nil
 	}
-	bugReporting, _ := bugReportingByID(bug, msg.BugID)
+	bugReporting, _ := bugReportingByID(bug, bugID)
 	if bugReporting == nil {
 		log.Errorf(c, "can't find bug reporting: %v", err)
 		if err := replyTo(c, msg, "", "Can't find the corresponding bug."); err != nil {

@@ -33,20 +33,28 @@ func ParsePatch(message []byte) (diff string) {
 			}
 		}
 	}
-	if err := s.Err(); err != nil {
+	err := s.Err()
+	if err == bufio.ErrTooLong {
+		// It's a problem of the incoming patch, rather than anything else.
+		// Anyway, if a patch contains too long lines, we're probably not
+		// interested in it, so let's pretent we didn't see it.
+		diff = ""
+		return
+	} else if err != nil {
 		panic("error while scanning from memory: " + err.Error())
 	}
 	return
 }
 
+var diffRegexps = []*regexp.Regexp{
+	regexp.MustCompile(`^(---|\+\+\+) [^\s]`),
+	regexp.MustCompile(`^diff --git`),
+	regexp.MustCompile(`^index [0-9a-f]+\.\.[0-9a-f]+`),
+	regexp.MustCompile(`^new file mode [0-9]+`),
+	regexp.MustCompile(`^Index: [^\s]`),
+}
+
 func lineMatchesDiffStart(ln string) bool {
-	diffRegexps := []*regexp.Regexp{
-		regexp.MustCompile(`^(---|\+\+\+) [^\s]`),
-		regexp.MustCompile(`^diff --git`),
-		regexp.MustCompile(`^index [0-9a-f]+\.\.[0-9a-f]+`),
-		regexp.MustCompile(`^new file mode [0-9]+`),
-		regexp.MustCompile(`^Index: [^\s]`),
-	}
 	for _, re := range diffRegexps {
 		if re.MatchString(ln) {
 			return true
