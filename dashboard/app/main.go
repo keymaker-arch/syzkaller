@@ -503,6 +503,9 @@ func handleSubsystemPage(c context.Context, w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return err
 	}
+	for _, group := range groups {
+		group.DispDiscuss = config.Namespaces[hdr.Namespace].DisplayDiscussions
+	}
 	cached, err := CacheGet(c, r, hdr.Namespace)
 	if err != nil {
 		return err
@@ -720,6 +723,18 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 			Value: dups,
 		})
 	}
+	discussions, err := getBugDiscussionsUI(c, bug)
+	if err != nil {
+		return err
+	}
+	if len(discussions) > 0 {
+		sections = append(sections, &uiCollapsible{
+			Title: fmt.Sprintf("Discussions (%d)", len(discussions)),
+			Show:  true,
+			Type:  sectionDiscussionList,
+			Value: discussions,
+		})
+	}
 	similar, err := loadSimilarBugsUI(c, r, bug, state)
 	if err != nil {
 		return err
@@ -727,6 +742,7 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 	if len(similar.Bugs) > 0 {
 		sections = append(sections, &uiCollapsible{
 			Title: fmt.Sprintf("Similar bugs (%d)", len(similar.Bugs)),
+			Show:  config.Namespaces[hdr.Namespace].AccessLevel != AccessPublic,
 			Type:  sectionBugList,
 			Value: similar,
 		})
@@ -745,18 +761,6 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 		if err != nil {
 			return err
 		}
-	}
-	discussions, err := getBugDiscussionsUI(c, bug)
-	if err != nil {
-		return err
-	}
-	if len(discussions) > 0 {
-		sections = append(sections, &uiCollapsible{
-			Title: fmt.Sprintf("Discussions (%d)", len(discussions)),
-			Show:  true,
-			Type:  sectionDiscussionList,
-			Value: discussions,
-		})
 	}
 	testPatchJobs, err := loadTestPatchJobs(c, bug)
 	if err != nil {
@@ -827,6 +831,8 @@ func makeBugSubsystemUI(c context.Context, bug *Bug, entry BugSubsystem) *uiBugS
 
 func getBugDiscussionsUI(c context.Context, bug *Bug) ([]*uiBugDiscussion, error) {
 	// TODO: also include dup bug discussions.
+	// TODO: limit the number of DiscussionReminder type entries, e.g. all with
+	// external replies + one latest.
 	var list []*uiBugDiscussion
 	discussions, err := discussionsForBug(c, bug.key(c))
 	if err != nil {

@@ -52,20 +52,16 @@ func main() {
 		for _, m := range thread.Messages {
 			messages = append(messages, dashapi.DiscussionMessage{
 				ID:       m.MessageID,
-				External: !emailInList(emails, m.Author),
+				External: !m.OwnEmail,
 				Time:     m.Date,
 			})
-		}
-		discType := dashapi.DiscussionReport
-		if strings.Contains(thread.Subject, "PATCH") {
-			discType = dashapi.DiscussionPatch
 		}
 		log.Printf("saving %d/%d", i+1, len(threads))
 		err := dash.SaveDiscussion(&dashapi.SaveDiscussionReq{
 			Discussion: &dashapi.Discussion{
 				ID:       thread.MessageID,
 				Source:   dashapi.DiscussionLore,
-				Type:     discType,
+				Type:     thread.Type,
 				Subject:  thread.Subject,
 				BugIDs:   thread.BugIDs,
 				Messages: messages,
@@ -144,19 +140,10 @@ func processArchives(dir string, emails, domains []string) []*lore.Thread {
 		}
 		ret = append(ret, d)
 		if *flagVerbose {
-			log.Printf("discussion ID=%s BugID=%s Subject=%s Messages=%d",
-				d.MessageID, d.BugIDs, d.Subject, len(d.Messages))
+			log.Printf("discussion ID=%s BugID=%s Type=%s Subject=%s Messages=%d",
+				d.MessageID, d.BugIDs, d.Subject, d.Type, len(d.Messages))
 		}
 	}
 	log.Printf("%d threads are related to syzbot", len(ret))
 	return ret
-}
-
-func emailInList(list []string, email string) bool {
-	for _, str := range list {
-		if str == email {
-			return true
-		}
-	}
-	return false
 }

@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -322,4 +323,77 @@ Link: https://testapp.appspot.com/bug?extid=%v
 	client.expectEQ(len(got), 1)
 	client.expectEQ(got[0].Link, "https://lore.kernel.org/all/2345/T/")
 	client.expectEQ(got[0].Subject, "[PATCH v3] A lot of fixes")
+}
+
+func TestIgnoreBotReplies(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	client := c.publicClient
+
+	build := testBuild(1)
+	client.UploadBuild(build)
+
+	crash := testCrash(build, 1)
+	client.ReportCrash(crash)
+	msg := client.pollEmailBug()
+	_, extBugID, err := email.RemoveAddrContext(msg.Sender)
+	c.expectOK(err)
+
+	incoming1 := fmt.Sprintf(`Date: Tue, 15 Aug 2017 14:59:00 -0700
+Message-ID: <2345>
+Subject: Re: Patch testing request
+From: %v
+To: lore@email.com
+In-Reply-To: <1234>
+Content-Type: text/plain
+
+Hello!
+`, msg.Sender)
+	_, err = c.POST("/_ah/mail/lore@email.com", incoming1)
+	c.expectOK(err)
+
+	bug, _, err := findBugByReportingID(c.ctx, extBugID)
+	c.expectOK(err)
+
+	// We have not seen the start of the discussion, but it should not go ignored.
+	got, err := getBugDiscussionsUI(c.ctx, bug)
+	c.expectOK(err)
+	client.expectEQ(len(got), 0)
+}
+
+func TestMessageOverflow(t *testing.T) {
+	date := time.Date(2000, time.January, 1, 1, 0, 0, 0, time.UTC)
+	d := &Discussion{}
+	first, last := dashapi.DiscussionMessage{
+		ID:   date.String(),
+		Time: date,
+	}, dashapi.DiscussionMessage{}
+	d.addMessages([]dashapi.DiscussionMessage{first})
+
+	const blockSize = 100
+	for i := 0; i < 2*maxMessagesInDiscussion; i += blockSize {
+		block := []dashapi.DiscussionMessage{}
+		for j := 0; j < blockSize; j++ {
+			date = date.Add(time.Minute)
+			last = dashapi.DiscussionMessage{
+				ID:   date.String(),
+				Time: date,
+			}
+			block = append(block, last)
+		}
+		// Make sure that the first message always remains in place and the last one
+		// is the latest one.
+		d.addMessages(block)
+		if !reflect.DeepEqual(first.ID, d.Messages[0].ID) {
+			t.Fatalf("unexpected first messages")
+		}
+		if !reflect.DeepEqual(last.ID, d.Messages[len(d.Messages)-1].ID) {
+			t.Fatalf("unexpected last messages")
+		}
+	}
+	if len(d.Messages) != maxMessagesInDiscussion {
+		t.Fatalf("expected len to be equal to %d, got %d",
+			maxMessagesInDiscussion, len(d.Messages))
+	}
 }

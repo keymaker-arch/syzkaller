@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/email"
 )
 
@@ -83,6 +84,28 @@ Content-Type: text/plain
 
 
 Patch`,
+		// An orphaned reply from a human.
+		`Date: Sun, 7 May 2017 19:57:00 -0700
+Subject: Another bug discussion
+In-Reply-To: <Unknown>
+Message-ID: <Sub-Discussion>
+From: person@email.com
+Cc: syzbot <syzbot+4564456@bar.com>
+Content-Type: text/plain
+
+
+Bug report`,
+		// An orphaned reply from a bot.
+		`Date: Sun, 7 May 2017 19:57:00 -0700
+Subject: Re: [syzbot] Some bug 3
+In-Reply-To: <Unknown>
+Message-ID: <Sub-Discussion-Bot>
+From: syzbot+4564456@bar.com
+To: all@email.com
+Content-Type: text/plain
+
+
+Bug report`,
 	}
 
 	zone := time.FixedZone("", -7*60*60)
@@ -90,6 +113,7 @@ Patch`,
 		"<A-Base>": {
 			Subject:   "Thread A",
 			MessageID: "<A-Base>",
+			Type:      dashapi.DiscussionMention,
 			Messages: []*email.Email{
 				{
 					MessageID: "<A-Base>",
@@ -122,6 +146,7 @@ Patch`,
 		"<Bug>": {
 			Subject:   "[syzbot] Some bug",
 			MessageID: "<Bug>",
+			Type:      dashapi.DiscussionReport,
 			BugIDs:    []string{"4564456"},
 			Messages: []*email.Email{
 				{
@@ -130,6 +155,7 @@ Patch`,
 					Subject:   "[syzbot] Some bug",
 					Date:      time.Date(2017, time.May, 7, 19, 57, 0, 0, zone),
 					Author:    "syzbot@bar.com",
+					OwnEmail:  true,
 					Command:   email.CmdNone,
 				},
 				{
@@ -142,11 +168,22 @@ Patch`,
 					InReplyTo: "<Bug>",
 					Command:   email.CmdNone,
 				},
+				{
+					MessageID: "<Bug-Reply2>",
+					BugIDs:    []string{"4564456"},
+					Subject:   "Re: [syzbot] Some bug",
+					Date:      time.Date(2017, time.May, 7, 19, 58, 1, 0, zone),
+					Author:    "d@user.com",
+					Cc:        []string{"d@user.com"},
+					InReplyTo: "<Bug>",
+					Command:   email.CmdNone,
+				},
 			},
 		},
 		"<Patch>": {
 			Subject:   "[PATCH] Some bug fixed",
 			MessageID: "<Patch>",
+			Type:      dashapi.DiscussionPatch,
 			BugIDs:    []string{"12345"},
 			Messages: []*email.Email{
 				{
@@ -160,6 +197,25 @@ Patch`,
 				},
 			},
 		},
+		"<Sub-Discussion>": {
+			Subject:   "Another bug discussion",
+			MessageID: "<Sub-Discussion>",
+			Type:      dashapi.DiscussionMention,
+			BugIDs:    []string{"4564456"},
+			Messages: []*email.Email{
+				{
+					MessageID: "<Sub-Discussion>",
+					InReplyTo: "<Unknown>",
+					Date:      time.Date(2017, time.May, 7, 19, 57, 0, 0, zone),
+					BugIDs:    []string{"4564456"},
+					Cc:        []string{"person@email.com"},
+					Subject:   "Another bug discussion",
+					Author:    "person@email.com",
+					Command:   email.CmdNone,
+				},
+			},
+		},
+		"<Sub-Discussion-Bot>": nil,
 	}
 
 	emails := []*email.Email{}
@@ -174,16 +230,68 @@ Patch`,
 	}
 
 	threads := Threads(emails)
+	got := map[string]*Thread{}
+
 	for _, d := range threads {
 		sort.Slice(d.Messages, func(i, j int) bool {
 			return d.Messages[i].Date.Before(d.Messages[j].Date)
 		})
-		if diff := cmp.Diff(expected[d.MessageID], d); diff != "" {
-			t.Fatalf("%s: %s", d.MessageID, diff)
+		got[d.MessageID] = d
+	}
+
+	for key, val := range expected {
+		if diff := cmp.Diff(val, got[key]); diff != "" {
+			t.Fatalf("%s: %s", key, diff)
 		}
 	}
 
-	if len(threads) != len(expected) {
+	if len(threads) > len(expected) {
 		t.Fatalf("Expected %d threads, got %d", len(expected), len(threads))
+	}
+}
+
+func TestDiscussionType(t *testing.T) {
+	tests := []struct {
+		msg *email.Email
+		ret dashapi.DiscussionType
+	}{
+		{
+			msg: &email.Email{
+				Subject: "[PATCH] Bla-bla",
+			},
+			ret: dashapi.DiscussionPatch,
+		},
+		{
+			msg: &email.Email{
+				Subject: "[patch v3] Bla-bla",
+			},
+			ret: dashapi.DiscussionPatch,
+		},
+		{
+			msg: &email.Email{
+				Subject:  "[syzbot] Monthly ext4 report",
+				OwnEmail: true,
+			},
+			ret: dashapi.DiscussionReminder,
+		},
+		{
+			msg: &email.Email{
+				Subject:  "[syzbot] WARNING in abcd",
+				OwnEmail: true,
+			},
+			ret: dashapi.DiscussionReport,
+		},
+		{
+			msg: &email.Email{
+				Subject: "Some human-reported bug",
+			},
+			ret: dashapi.DiscussionMention,
+		},
+	}
+	for _, test := range tests {
+		got := DiscussionType(test.msg)
+		if got != test.ret {
+			t.Fatalf("expected %v got %v for %v", test.ret, got, test.msg)
+		}
 	}
 }
