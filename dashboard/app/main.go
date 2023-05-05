@@ -20,6 +20,7 @@ import (
 	"cloud.google.com/go/logging"
 	"cloud.google.com/go/logging/logadmin"
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/debugtracer"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/html"
 	"github.com/google/syzkaller/pkg/subsystem"
@@ -66,7 +67,6 @@ func initHTTPHandlers() {
 	}
 	http.HandleFunc("/cron/cache_update", cacheUpdate)
 	http.HandleFunc("/cron/deprecate_assets", handleDeprecateAssets)
-	http.HandleFunc("/cron/retest_repros", handleRetestRepros)
 	http.HandleFunc("/cron/refresh_subsystems", handleRefreshSubsystems)
 	http.HandleFunc("/cron/subsystem_reports", handleSubsystemReports)
 }
@@ -237,22 +237,22 @@ type uiBugDiscussion struct {
 }
 
 type uiBugPage struct {
-	Header        *uiHeader
-	Now           time.Time
-	Bug           *uiBug
-	BisectCause   *uiJob
-	BisectFix     *uiJob
-	Sections      []*uiCollapsible
-	SampleReport  template.HTML
-	Crashes       *uiCrashTable
-	TestPatchJobs *uiJobList
-	Subsystems    []*uiBugSubsystem
+	Header          *uiHeader
+	Now             time.Time
+	Bug             *uiBug
+	BisectCause     *uiJob
+	BisectFix       *uiJob
+	Sections        []*uiCollapsible
+	SampleReport    template.HTML
+	Crashes         *uiCrashTable
+	TestPatchJobs   *uiJobList
+	Labels          []*uiBugLabel
+	DebugSubsystems string
 }
 
 const (
 	sectionBugList        = "bug_list"
 	sectionJobList        = "job_list"
-	sectionCrashList      = "crash_list"
 	sectionDiscussionList = "discussion_list"
 )
 
@@ -306,11 +306,11 @@ type uiBug struct {
 	MissingOn      []string
 	NumManagers    int
 	LastActivity   time.Time
-	Subsystems     []*uiBugSubsystem
+	Labels         []*uiBugLabel
 	Discussions    DiscussionSummary
 }
 
-type uiBugSubsystem struct {
+type uiBugLabel struct {
 	Name string
 	Link string
 }
@@ -369,21 +369,22 @@ type uiJob struct {
 	Commits          []*uiCommit // for inconclusive bisection
 	Crash            *uiCrash
 	Reported         bool
+	TreeOrigin       bool
 }
 
 type userBugFilter struct {
 	Manager     string // show bugs that happened on the manager
 	OnlyManager string // show bugs that happened ONLY on the manager
-	Subsystem   string // only show bugs belonging to the subsystem
+	Label       string // TODO: support multiple.
 	NoSubsystem bool
 }
 
 func MakeBugFilter(r *http.Request) *userBugFilter {
 	return &userBugFilter{
-		Subsystem:   r.FormValue("subsystem"),
 		NoSubsystem: r.FormValue("no_subsystem") != "",
 		Manager:     r.FormValue("manager"),
 		OnlyManager: r.FormValue("only_manager"),
+		Label:       r.FormValue("label"),
 	}
 }
 
@@ -412,20 +413,26 @@ func (filter *userBugFilter) MatchBug(bug *Bug) bool {
 	if filter.Manager != "" && !stringInList(bug.HappenedOn, filter.Manager) {
 		return false
 	}
-	if filter.NoSubsystem && len(bug.Tags.Subsystems) > 0 {
+	if filter.NoSubsystem && len(bug.LabelValues(SubsystemLabel)) > 0 {
 		return false
 	}
-	if filter.Subsystem != "" && !bug.hasSubsystem(filter.Subsystem) {
-		return false
+	if filter.Label != "" {
+		label, value := splitLabel(filter.Label)
+		return bug.HasLabel(label, value)
 	}
 	return true
+}
+
+func splitLabel(rawLabel string) (BugLabelType, string) {
+	label, value, _ := strings.Cut(rawLabel, ":")
+	return BugLabelType(label), value
 }
 
 func (filter *userBugFilter) Any() bool {
 	if filter == nil {
 		return false
 	}
-	return filter.Subsystem != "" || filter.OnlyManager != "" || filter.Manager != "" || filter.NoSubsystem
+	return filter.Label != "" || filter.OnlyManager != "" || filter.Manager != "" || filter.NoSubsystem
 }
 
 // handleMain serves main page.
@@ -498,7 +505,10 @@ func handleSubsystemPage(c context.Context, w http.ResponseWriter, r *http.Reque
 	}
 	groups, err := fetchNamespaceBugs(c, accessLevel(c, r),
 		hdr.Namespace, &userBugFilter{
-			Subsystem: subsystem.Name,
+			Label: BugLabel{
+				Label: SubsystemLabel,
+				Value: subsystem.Name,
+			}.String(),
 		})
 	if err != nil {
 		return err
@@ -673,6 +683,9 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 	if err := checkAccessLevel(c, r, bug.sanitizeAccess(accessLevel)); err != nil {
 		return err
 	}
+	if r.FormValue("debug_subsystems") != "" && accessLevel == AccessAdmin {
+		return debugBugSubsystems(c, w, bug)
+	}
 	hdr, err := commonHeader(c, r, w, bug.Namespace)
 	if err != nil {
 		return err
@@ -786,8 +799,11 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 		SampleReport: sampleReport,
 		Crashes:      crashesTable,
 	}
-	for _, entry := range bug.Tags.Subsystems {
-		data.Subsystems = append(data.Subsystems, makeBugSubsystemUI(c, bug, entry))
+	for _, entry := range bug.Labels {
+		data.Labels = append(data.Labels, makeBugLabelUI(c, bug, entry))
+	}
+	if accessLevel == AccessAdmin && !bug.hasUserSubsystems() {
+		data.DebugSubsystems = html.AmendURL(data.Bug.Link, "debug_subsystems", "1")
 	}
 	// bug.BisectFix is set to BisectNot in two cases :
 	// - no fix bisections have been performed on the bug
@@ -800,8 +816,11 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 		if len(fixBisections) != 0 {
 			data.Sections = append(data.Sections, &uiCollapsible{
 				Title: fmt.Sprintf("Fix bisection attempts (%d)", len(fixBisections)),
-				Type:  sectionCrashList,
-				Value: &uiCrashTable{Crashes: fixBisections},
+				Type:  sectionJobList,
+				Value: &uiJobList{
+					PerBug: true,
+					Jobs:   fixBisections,
+				},
 			})
 		}
 	}
@@ -814,19 +833,47 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 	return serveTemplate(w, "bug.html", data)
 }
 
-func makeBugSubsystemUI(c context.Context, bug *Bug, entry BugSubsystem) *uiBugSubsystem {
-	url := getCurrentURL(c)
-	// By default let's point to the subsystem's page.
-	link := fmt.Sprintf("/%s/s/%s", bug.Namespace, entry.Name)
-	if strings.HasPrefix(url, "/"+bug.Namespace) &&
-		!strings.Contains(url, "/s/") {
-		// If we're on a main or terminal page, let's amend the bug filter instead.
-		link = html.AmendURL(url, "subsystem", entry.Name)
+func debugBugSubsystems(c context.Context, w http.ResponseWriter, bug *Bug) error {
+	service := getSubsystemService(c, bug.Namespace)
+	if service == nil {
+		w.Write([]byte("Subsystem service was not found."))
+		return nil
 	}
-	return &uiBugSubsystem{
-		Name: entry.Name,
+	_, err := inferSubsystems(c, bug, bug.key(c), &debugtracer.GenericTracer{
+		TraceWriter: w,
+	})
+	if err != nil {
+		w.Write([]byte(fmt.Sprintf("%s", err)))
+	}
+	return nil
+}
+
+func makeBugLabelUI(c context.Context, bug *Bug, entry BugLabel) *uiBugLabel {
+	url := getCurrentURL(c)
+	filterValue := entry.String()
+
+	// If we're on a main/terminal/subsystem page, let's stay there.
+	link := url
+	if !strings.HasPrefix(url, "/"+bug.Namespace) {
+		link = fmt.Sprintf("/%s", bug.Namespace)
+	}
+	link = html.AmendURL(link, "label", filterValue)
+
+	ret := &uiBugLabel{
+		Name: filterValue,
 		Link: link,
 	}
+	// Patch depending on the specific label type.
+	switch entry.Label {
+	case SubsystemLabel:
+		// Use just the subsystem name.
+		ret.Name = entry.Value
+		// Prefer link to the per-subsystem page.
+		if !strings.HasPrefix(url, "/"+bug.Namespace) || strings.Contains(url, "/s/") {
+			ret.Link = fmt.Sprintf("/%s/s/%s", bug.Namespace, entry.Value)
+		}
+	}
+	return ret
 }
 
 func getBugDiscussionsUI(c context.Context, bug *Bug) ([]*uiBugDiscussion, error) {
@@ -974,7 +1021,7 @@ func getUIJob(c context.Context, bug *Bug, jobType JobType) (*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	return makeUIJob(job, jobKey, bug, crash, build), nil
+	return makeUIJob(c, job, jobKey, bug, crash, build), nil
 }
 
 func handleSubsystemsList(c context.Context, w http.ResponseWriter, r *http.Request) error {
@@ -1322,10 +1369,11 @@ func fetchTerminalBugs(c context.Context, accessLevel AccessLevel,
 }
 
 func applyBugFilter(query *db.Query, filter *userBugFilter) *db.Query {
-	manager, subsystem := filter.ManagerName(), filter.Subsystem
-	if subsystem != "" {
-		// Subsystem filter is more granular, so give it priority.
-		query = query.Filter("Tags.Subsystems.Name=", subsystem)
+	manager := filter.ManagerName()
+	label, value := splitLabel(filter.Label)
+	if label != EmptyLabel {
+		query = query.Filter("Labels.Label=", string(label))
+		query = query.Filter("Labels.Value=", value)
 	} else if manager != "" {
 		query = query.Filter("HappenedOn=", manager)
 	}
@@ -1476,8 +1524,8 @@ func createUIBug(c context.Context, bug *Bug, state *ReportingState, managers []
 		LastActivity:   bug.LastActivity,
 		Discussions:    bug.discussionSummary(),
 	}
-	for _, entry := range bug.Tags.Subsystems {
-		uiBug.Subsystems = append(uiBug.Subsystems, makeBugSubsystemUI(c, bug, entry))
+	for _, entry := range bug.Labels {
+		uiBug.Labels = append(uiBug.Labels, makeBugLabelUI(c, bug, entry))
 	}
 	updateBugBadness(c, uiBug)
 	if len(bug.Commits) != 0 {
@@ -1555,7 +1603,7 @@ func loadCrashesForBug(c context.Context, bug *Bug) ([]*uiCrash, template.HTML, 
 			}
 			builds[crash.BuildID] = build
 		}
-		results = append(results, makeUICrash(crash, build))
+		results = append(results, makeUICrash(c, crash, build))
 	}
 	sampleReport, _, err := getText(c, textCrashReport, crashes[0].Report)
 	if err != nil {
@@ -1578,14 +1626,14 @@ func linkifyReport(report []byte, repo, commit string) template.HTML {
 
 var sourceFileRe = regexp.MustCompile("( |\t|\n)([a-zA-Z0-9/_.-]+\\.(?:h|c|cc|cpp|s|S|go|rs)):([0-9]+)( |!|\\)|\t|\n)")
 
-func loadFixBisectionsForBug(c context.Context, bug *Bug) ([]*uiCrash, error) {
+func loadFixBisectionsForBug(c context.Context, bug *Bug) ([]*uiJob, error) {
 	bugKey := bug.key(c)
-	jobs, _, err := queryJobsForBug(c, bugKey, JobBisectFix)
+	jobs, jobKeys, err := queryJobsForBug(c, bugKey, JobBisectFix)
 	if err != nil {
 		return nil, err
 	}
-	var results []*uiCrash
-	for _, job := range jobs {
+	var results []*uiJob
+	for i, job := range jobs {
 		crash, err := queryCrashForJob(c, job, bugKey)
 		if err != nil {
 			return nil, err
@@ -1597,12 +1645,13 @@ func loadFixBisectionsForBug(c context.Context, bug *Bug) ([]*uiCrash, error) {
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, makeUICrash(crash, build))
+
+		results = append(results, makeUIJob(c, job, jobKeys[i], bug, crash, build))
 	}
 	return results, nil
 }
 
-func makeUICrash(crash *Crash, build *Build) *uiCrash {
+func makeUICrash(c context.Context, crash *Crash, build *Build) *uiCrash {
 	uiAssets := []*uiAsset{}
 	for _, asset := range createAssetList(build, crash) {
 		uiAssets = append(uiAssets, &uiAsset{
@@ -1625,18 +1674,18 @@ func makeUICrash(crash *Crash, build *Build) *uiCrash {
 		Assets:          uiAssets,
 	}
 	if build != nil {
-		ui.uiBuild = makeUIBuild(build)
+		ui.uiBuild = makeUIBuild(c, build)
 	}
 	return ui
 }
 
-func makeUIBuild(build *Build) *uiBuild {
+func makeUIBuild(c context.Context, build *Build) *uiBuild {
 	return &uiBuild{
 		Time:                build.Time,
 		SyzkallerCommit:     build.SyzkallerCommit,
 		SyzkallerCommitLink: vcs.LogLink(vcs.SyzkallerRepo, build.SyzkallerCommit),
 		SyzkallerCommitDate: build.SyzkallerCommitDate,
-		KernelAlias:         kernelRepoInfo(build).Alias,
+		KernelAlias:         kernelRepoInfo(c, build).Alias,
 		KernelCommit:        build.KernelCommit,
 		KernelCommitLink:    vcs.LogLink(build.KernelRepo, build.KernelCommit),
 		KernelCommitTitle:   build.KernelCommitTitle,
@@ -1727,7 +1776,7 @@ func loadManagers(c context.Context, accessLevel AccessLevel, ns string, filter 
 	}
 	uiBuilds := make(map[string]*uiBuild)
 	for _, build := range builds {
-		uiBuilds[build.Namespace+"|"+build.ID] = makeUIBuild(build)
+		uiBuilds[build.Namespace+"|"+build.ID] = makeUIBuild(c, build)
 	}
 	var fullStats []*ManagerStats
 	for _, mgr := range managers {
@@ -1820,7 +1869,7 @@ func loadRecentJobs(c context.Context) ([]*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getUIJobs(keys, jobs), nil
+	return getUIJobs(c, keys, jobs), nil
 }
 
 func loadPendingJobs(c context.Context) ([]*uiJob, error) {
@@ -1832,7 +1881,7 @@ func loadPendingJobs(c context.Context) ([]*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getUIJobs(keys, jobs), nil
+	return getUIJobs(c, keys, jobs), nil
 }
 
 func loadRunningJobs(c context.Context) ([]*uiJob, error) {
@@ -1844,13 +1893,13 @@ func loadRunningJobs(c context.Context) ([]*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getUIJobs(keys, jobs), nil
+	return getUIJobs(c, keys, jobs), nil
 }
 
-func getUIJobs(keys []*db.Key, jobs []*Job) []*uiJob {
+func getUIJobs(c context.Context, keys []*db.Key, jobs []*Job) []*uiJob {
 	var results []*uiJob
 	for i, job := range jobs {
-		results = append(results, makeUIJob(job, keys[i], nil, nil, nil))
+		results = append(results, makeUIJob(c, job, keys[i], nil, nil, nil))
 	}
 	return results
 }
@@ -1884,12 +1933,12 @@ func loadTestPatchJobs(c context.Context, bug *Bug) ([]*uiJob, error) {
 				return nil, err
 			}
 		}
-		results = append(results, makeUIJob(job, keys[i], nil, nil, build))
+		results = append(results, makeUIJob(c, job, keys[i], nil, nil, build))
 	}
 	return results, nil
 }
 
-func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *uiJob {
+func makeUIJob(c context.Context, job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *uiJob {
 	kernelRepo, kernelCommit := job.KernelRepo, job.KernelBranch
 	if build != nil {
 		kernelRepo, kernelCommit = build.KernelRepo, build.KernelCommit
@@ -1905,7 +1954,7 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 		Namespace:        job.Namespace,
 		Manager:          job.Manager,
 		BugTitle:         job.BugTitle,
-		KernelAlias:      kernelRepoInfoRaw(job.Namespace, job.KernelRepo, job.KernelBranch).Alias,
+		KernelAlias:      kernelRepoInfoRaw(c, job.Namespace, job.KernelRepo, job.KernelBranch).Alias,
 		KernelCommitLink: vcs.CommitLink(kernelRepo, kernelCommit),
 		PatchLink:        textLink(textPatch, job.Patch),
 		Attempts:         job.Attempts,
@@ -1917,6 +1966,7 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 		LogLink:          textLink(textLog, job.Log),
 		ErrorLink:        textLink(textError, job.Error),
 		Reported:         job.Reported,
+		TreeOrigin:       job.TreeOrigin,
 	}
 	if !job.Finished.IsZero() {
 		ui.Duration = job.Finished.Sub(job.LastStarted)
@@ -1943,7 +1993,7 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 		ui.Commits = nil
 	}
 	if crash != nil {
-		ui.Crash = makeUICrash(crash, build)
+		ui.Crash = makeUICrash(c, crash, build)
 	}
 	return ui
 }

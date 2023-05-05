@@ -311,7 +311,7 @@ func createNotification(c context.Context, typ dashapi.BugNotif, public bool, te
 	if err != nil {
 		return nil, err
 	}
-	kernelRepo := kernelRepoInfo(build)
+	kernelRepo := kernelRepoInfo(c, build)
 	notif := &dashapi.BugNotification{
 		Type:      typ,
 		Namespace: bug.Namespace,
@@ -458,7 +458,7 @@ func crashBugReport(c context.Context, bug *Bug, crash *Crash, crashKey *db.Key,
 		typ = dashapi.ReportRepro
 	}
 	assetList := createAssetList(build, crash)
-	kernelRepo := kernelRepoInfo(build)
+	kernelRepo := kernelRepoInfo(c, build)
 	rep := &dashapi.BugReport{
 		Type:            typ,
 		Config:          reportingConfig,
@@ -547,7 +547,7 @@ func fillBugReport(c context.Context, rep *dashapi.BugReport, bug *Bug, bugRepor
 	rep.BuildTime = build.Time
 	rep.CompilerID = build.CompilerID
 	rep.KernelRepo = build.KernelRepo
-	rep.KernelRepoAlias = kernelRepoInfo(build).Alias
+	rep.KernelRepoAlias = kernelRepoInfo(c, build).Alias
 	rep.KernelBranch = build.KernelBranch
 	rep.KernelCommit = build.KernelCommit
 	rep.KernelCommitTitle = build.KernelCommitTitle
@@ -556,14 +556,14 @@ func fillBugReport(c context.Context, rep *dashapi.BugReport, bug *Bug, bugRepor
 	rep.KernelConfigLink = externalLink(c, textKernelConfig, build.KernelConfig)
 	rep.SyzkallerCommit = build.SyzkallerCommit
 	rep.NoRepro = build.Type == BuildFailed
-	for _, item := range bug.Tags.Subsystems {
+	for _, item := range bug.LabelValues(SubsystemLabel) {
 		rep.Subsystems = append(rep.Subsystems, dashapi.BugSubsystem{
-			Name:  item.Name,
+			Name:  item.Value,
 			SetBy: item.SetBy,
-			Link:  fmt.Sprintf("%v/%s/s/%s", appURL(c), bug.Namespace, item.Name),
+			Link:  fmt.Sprintf("%v/%s/s/%s", appURL(c), bug.Namespace, item.Value),
 		})
 		rep.Maintainers = email.MergeEmailLists(rep.Maintainers,
-			subsystemMaintainers(c, rep.Namespace, item.Name))
+			subsystemMaintainers(c, rep.Namespace, item.Value))
 	}
 	for _, addr := range bug.UNCC {
 		rep.CC = email.RemoveFromEmailList(rep.CC, addr)
@@ -610,7 +610,7 @@ func managersToRepos(c context.Context, ns string, managers []string) []string {
 			log.Errorf(c, "failed to get manager %q build: %v", manager, err)
 			continue
 		}
-		repo := kernelRepoInfo(build).Alias
+		repo := kernelRepoInfo(c, build).Alias
 		if dedup[repo] {
 			continue
 		}
@@ -681,6 +681,18 @@ func foreachBug(c context.Context, filter func(*db.Query) *db.Query, fn func(bug
 		}
 		cursor = &cur
 	}
+}
+
+func filterBugs(bugs []*Bug, keys []*db.Key, filter func(*Bug) bool) ([]*Bug, []*db.Key) {
+	var retBugs []*Bug
+	var retKeys []*db.Key
+	for i, bug := range bugs {
+		if filter(bug) {
+			retBugs = append(retBugs, bugs[i])
+			retKeys = append(retKeys, keys[i])
+		}
+	}
+	return retBugs, retKeys
 }
 
 // reportingPollClosed is called by backends to get list of closed bugs.
@@ -943,7 +955,11 @@ func incomingCommandUpdate(c context.Context, now time.Time, cmd *dashapi.BugUpd
 	if cmd.Status != dashapi.BugStatusOpen || !cmd.OnHold {
 		bugReporting.OnHold = time.Time{}
 	}
-	bug.LastActivity = now
+	if cmd.Status != dashapi.BugStatusUpdate || cmd.ExtID != "" {
+		// Update LastActivity only on important events.
+		// Otherwise it impedes bug obsoletion.
+		bug.LastActivity = now
+	}
 	return true, "", nil
 }
 

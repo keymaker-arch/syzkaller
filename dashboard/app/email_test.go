@@ -12,6 +12,7 @@ import (
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/sys/targets"
+	"github.com/stretchr/testify/assert"
 )
 
 // nolint: funlen
@@ -70,7 +71,20 @@ See https://goo.gl/tpsmEJ for more information about syzbot.
 syzbot engineers can be reached at syzkaller@googlegroups.com.
 
 syzbot will keep track of this issue. See:
-https://goo.gl/tpsmEJ#status for how to communicate with syzbot.`,
+https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 			extBugID0, crashLogLink, kernelConfigLink))
 		c.checkURLContents(crashLogLink, crash.Log)
 		c.checkURLContents(kernelConfigLink, build.KernelConfig)
@@ -173,6 +187,11 @@ IMPORTANT: if you fix the issue, please add the following tag to the commit:
 Reported-by: syzbot+%[1]v@testapp.appspotmail.com
 
 report1
+
+---
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
 `, extBugID0, reproSyzLink, crashLogLink, kernelConfigLink))
 		c.checkURLContents(reproSyzLink, syzRepro)
 		c.checkURLContents(crashLogLink, crash.Log)
@@ -232,8 +251,23 @@ syzbot engineers can be reached at syzkaller@googlegroups.com.
 
 syzbot will keep track of this issue. See:
 https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
-syzbot can test patches for this issue, for details see:
-https://goo.gl/tpsmEJ#testing-patches`,
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 			extBugID1, reproSyzLink, crashLogLink, kernelConfigLink))
 		c.checkURLContents(reproSyzLink, syzRepro)
 		c.checkURLContents(crashLogLink, crash.Log)
@@ -298,6 +332,11 @@ IMPORTANT: if you fix the issue, please add the following tag to the commit:
 Reported-by: syzbot+%[1]v@testapp.appspotmail.com
 
 report1
+
+---
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
 `, extBugID1, reproCLink, reproSyzLink, crashLogLink, kernelConfigLink))
 		c.checkURLContents(reproCLink, cRepro)
 		c.checkURLContents(reproSyzLink, syzRepro)
@@ -339,7 +378,7 @@ unknown command "bad-command"
 	// nolint: lll
 	c.expectEQ(reply, `> #syz fix: some: commit title
 
-Your 'fix:' command is accepted, but please keep bugs@syzkaller.com mailing list in CC next time. It serves as a history of what happened with each bug report. Thank you.
+Your commands are accepted, but please keep bugs@syzkaller.com mailing list in CC next time. It serves as a history of what happened with each bug report. Thank you.
 
 `)
 
@@ -659,7 +698,20 @@ See https://goo.gl/tpsmEJ for more information about syzbot.
 syzbot engineers can be reached at syzkaller@googlegroups.com.
 
 syzbot will keep track of this issue. See:
-https://goo.gl/tpsmEJ#status for how to communicate with syzbot.`,
+https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 		extBugID, crashLogLink, kernelConfigLink))
 }
 
@@ -816,7 +868,20 @@ See https://goo.gl/tpsmEJ for more information about syzbot.
 syzbot engineers can be reached at syzkaller@googlegroups.com.
 
 syzbot will keep track of this issue. See:
-https://goo.gl/tpsmEJ#status for how to communicate with syzbot.`,
+https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 		extBugID, crashLogLink, kernelConfigLink))
 	c.checkURLContents(crashLogLink, crash.Log)
 }
@@ -1073,7 +1138,7 @@ func TestEmailPatchTestingAccess(t *testing.T) {
 	c.expectEQ(pollResp.ID, "")
 }
 
-func TestEmailInvalidSetCommand(t *testing.T) {
+func TestEmailSetInvalidSubsystems(t *testing.T) {
 	c := NewCtx(t)
 	defer c.Close()
 
@@ -1089,32 +1154,23 @@ func TestEmailInvalidSetCommand(t *testing.T) {
 
 	sender := c.pollEmailBug().Sender
 
-	// Fully invalid command.
-	c.incomingEmail(sender, "#syz set tag\n",
-		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
-	syzbotReply := c.pollEmailBug()
-	c.expectEQ(strings.Contains(syzbotReply.Body, "I've failed to parse your command"), true)
-
 	// Invalid subsystem name.
 	c.incomingEmail(sender, "#syz set subsystems: non-existent",
 		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
 	c.expectEQ(c.pollEmailBug().Body, `> #syz set subsystems: non-existent
 
-Please use subsystem names from the list of supported subsystems:
-https://testapp.appspot.com/access-public-email/subsystems?all=true
+The specified label value is incorrect.
+"non-existent" is not among the allowed values.
+Please use one of the supported label values.
 
-If you believe that the subsystem list should be changed, please contact the bot's maintainers.
+The following labels are suported:
+missing-backport, no-reminders, prio: {low, normal, high}, subsystems: {.. see below ..}
+The list of subsystems: https://testapp.appspot.com/access-public-email/subsystems?all=true
 
 `)
-
-	// No subsystems.
-	c.incomingEmail(sender, "#syz set subsystems:\n",
-		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
-	c.expectEQ(strings.Contains(c.pollEmailBug().Body,
-		"You must specify at least one subsystem name"), true)
 }
 
-func TestEmailSetCommand(t *testing.T) {
+func TestEmailSetSubsystems(t *testing.T) {
 	c := NewCtx(t)
 	defer c.Close()
 
@@ -1133,20 +1189,123 @@ func TestEmailSetCommand(t *testing.T) {
 	c.expectOK(err)
 
 	// At the beginning, there are no subsystems.
-	expectSubsystems(t, client, extBugID)
+	expectLabels(t, client, extBugID)
 
 	// Set one subsystem.
 	c.incomingEmail(sender, "#syz set subsystems: subsystemA\n",
 		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
-	syzbotReply := c.pollEmailBug()
-	c.expectEQ(syzbotReply.To, []string{"test@requester.com"})
-	c.expectEQ(syzbotReply.Cc, []string{"test@syzkaller.com"})
-	c.expectEQ(strings.Contains(syzbotReply.Body, "I've successfully updated the bug's subsystems."), true)
-	expectSubsystems(t, client, extBugID, "subsystemA")
+	expectLabels(t, client, extBugID, "subsystems:subsystemA")
 
 	// Set two subsystems.
 	c.incomingEmail(sender, "#syz set subsystems: subsystemA, subsystemB\n",
 		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
-	c.pollEmailBug()
-	expectSubsystems(t, client, extBugID, "subsystemA", "subsystemB")
+	expectLabels(t, client, extBugID, "subsystems:subsystemA", "subsystems:subsystemB")
+}
+
+func TestEmailBugLabels(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	client := c.makeClient(clientPublicEmail, keyPublicEmail, true)
+	mailingList := config.Namespaces["access-public-email"].Reporting[0].Config.(*EmailConfig).Email
+
+	build := testBuild(1)
+	client.UploadBuild(build)
+
+	crash := testCrash(build, 1)
+	client.ReportCrash(crash)
+
+	sender := c.pollEmailBug().Sender
+	_, extBugID, err := email.RemoveAddrContext(sender)
+	c.expectOK(err)
+
+	// At the beginning, there are no tags.
+	expectLabels(t, client, extBugID)
+
+	// Set a tag.
+	c.incomingEmail(sender, "#syz set prio: low\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	expectLabels(t, client, extBugID, "prio:low")
+
+	// Notice that medium prio supercedes low prio since they are of the oneOf type.
+	c.incomingEmail(sender, "#syz set prio: high\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	expectLabels(t, client, extBugID, "prio:high")
+
+	// Also set a flag label.
+	c.incomingEmail(sender, "#syz set no-reminders\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	expectLabels(t, client, extBugID, "prio:high", "no-reminders")
+
+	// Remove a tag.
+	c.incomingEmail(sender, "#syz unset prio\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	expectLabels(t, client, extBugID, "no-reminders")
+
+	// Remove another tag.
+	c.incomingEmail(sender, "#syz unset no-reminders\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	expectLabels(t, client, extBugID)
+}
+
+func TestInvalidEmailBugLabels(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	client := c.makeClient(clientPublicEmail, keyPublicEmail, true)
+	mailingList := config.Namespaces["access-public-email"].Reporting[0].Config.(*EmailConfig).Email
+
+	build := testBuild(1)
+	client.UploadBuild(build)
+
+	crash := testCrash(build, 1)
+	client.ReportCrash(crash)
+	c.incomingEmail(c.pollEmailBug().Sender, "#syz upstream\n")
+
+	sender := c.pollEmailBug().Sender
+
+	// Non-existing label.
+	c.incomingEmail(sender, "#syz set label: tag",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	body := c.pollEmailBug().Body
+	c.expectEQ(body, `> #syz set label: tag
+
+The specified label "label" is unknown.
+Please use one of the supported labels.
+
+The following labels are suported:
+missing-backport, no-reminders, prio: {low, normal, high}, subsystems: {.. see below ..}
+The list of subsystems: https://testapp.appspot.com/access-public-email/subsystems?all=true
+
+`)
+
+	// Existing label, wrong value.
+	c.incomingEmail(sender, "#syz set prio: unknown\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	c.expectEQ(strings.Contains(c.pollEmailBug().Body,
+		`The specified label value is incorrect.
+"unknown" is not among the allowed values`), true)
+
+	// Existing label, too many values.
+	c.incomingEmail(sender, "#syz set prio: low, high\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	c.expectEQ(strings.Contains(c.pollEmailBug().Body,
+		`The specified label value is incorrect.
+You must specify only one of the allowed values.`), true)
+
+	// Removing a non-existing label.
+	c.incomingEmail(sender, "#syz unset tag2\n",
+		EmailOptFrom("test@requester.com"), EmailOptCC([]string{mailingList}))
+	syzbotReply := c.pollEmailBug()
+	c.expectEQ(strings.Contains(syzbotReply.Body, "The following labels did not exist: tag2"), true)
+}
+
+func expectLabels(t *testing.T, client *apiClient, extID string, labels ...string) {
+	t.Helper()
+	bug, _, _ := client.Ctx.loadBug(extID)
+	names := []string{}
+	for _, item := range bug.Labels {
+		names = append(names, item.String())
+	}
+	assert.ElementsMatch(t, names, labels)
 }

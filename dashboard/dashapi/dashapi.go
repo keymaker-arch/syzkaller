@@ -176,6 +176,8 @@ type JobPollResp struct {
 	Manager           string
 	KernelRepo        string
 	KernelBranch      string
+	MergeBaseRepo     string
+	MergeBaseBranch   string
 	KernelCommit      string
 	KernelCommitTitle string
 	KernelCommitDate  time.Time
@@ -454,6 +456,7 @@ type BisectResult struct {
 
 type BugListReport struct {
 	ID          string
+	Created     time.Time
 	Config      []byte
 	Bugs        []BugListItem
 	TotalStats  BugListReportStats

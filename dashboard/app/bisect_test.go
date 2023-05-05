@@ -91,6 +91,7 @@ func TestBisectCause(t *testing.T) {
 
 	// BisectCause #2
 	pollResp2 := pollResp
+	c.advanceTime(time.Minute)
 	pollResp = c.client2.pollJobs(build.Manager)
 	c.expectNE(pollResp.ID, pollResp2.ID)
 	c.expectEQ(pollResp.ReproOpts, []byte("repro opts 2"))
@@ -233,8 +234,23 @@ syzbot engineers can be reached at syzkaller@googlegroups.com.
 syzbot will keep track of this issue. See:
 https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
 For information about bisection process see: https://goo.gl/tpsmEJ#bisection
-syzbot can test patches for this issue, for details see:
-https://goo.gl/tpsmEJ#testing-patches`,
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 			extBugID2, crashLogLink, kernelConfigLink, reproSyzLink, reproCLink,
 			bisectLogLink, bisectCrashReportLink, bisectCrashLogLink))
 	}
@@ -248,6 +264,7 @@ https://goo.gl/tpsmEJ#testing-patches`,
 		"bugs2@syzkaller.com",
 		"default2@maintainers.com",
 	})
+	c.advanceTime(time.Minute)
 	pollResp = c.client2.pollJobs(build.Manager)
 
 	// Bisection succeeded.
@@ -307,6 +324,7 @@ https://goo.gl/tpsmEJ#testing-patches`,
 	}
 
 	// BisectFix #2
+	c.advanceTime(time.Minute)
 	pollResp = c.client2.pollJobs(build.Manager)
 	c.expectNE(pollResp.ID, "")
 	c.expectEQ(pollResp.Type, dashapi.JobBisectFix)
@@ -320,6 +338,7 @@ https://goo.gl/tpsmEJ#testing-patches`,
 	c.expectOK(c.client2.JobDone(done))
 
 	// BisectFix #3
+	c.advanceTime(time.Minute)
 	pollResp = c.client2.pollJobs(build.Manager)
 	c.expectNE(pollResp.ID, "")
 	c.expectEQ(pollResp.Type, dashapi.JobBisectFix)
@@ -332,6 +351,7 @@ https://goo.gl/tpsmEJ#testing-patches`,
 	c.expectOK(c.client2.JobDone(done))
 
 	// BisectFix #4
+	c.advanceTime(time.Minute)
 	pollResp = c.client2.pollJobs(build.Manager)
 	c.expectNE(pollResp.ID, "")
 	c.expectEQ(pollResp.Type, dashapi.JobBisectFix)
@@ -533,8 +553,23 @@ syzbot engineers can be reached at syzkaller@googlegroups.com.
 syzbot will keep track of this issue. See:
 https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
 For information about bisection process see: https://goo.gl/tpsmEJ#bisection
-syzbot can test patches for this issue, for details see:
-https://goo.gl/tpsmEJ#testing-patches`,
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 			extBugID2, crashLogLink, kernelConfigLink, reproSyzLink, reproCLink, bisectLogLink))
 	}
 }
@@ -799,8 +834,23 @@ syzbot engineers can be reached at syzkaller@googlegroups.com.
 syzbot will keep track of this issue. See:
 https://goo.gl/tpsmEJ#status for how to communicate with syzbot.
 For information about bisection process see: https://goo.gl/tpsmEJ#bisection
-syzbot can test patches for this issue, for details see:
-https://goo.gl/tpsmEJ#testing-patches`,
+
+If the bug is already fixed, let syzbot know by replying with:
+#syz fix: exact-commit-title
+
+If you want syzbot to run the reproducer, reply with:
+#syz test: git://repo/address.git branch-or-commit-hash
+If you attach or paste a git patch, syzbot will apply it before testing.
+
+If you want to change bug's subsystems, reply with:
+#syz set subsystems: new-subsystem
+(See the list of subsystem names on the web dashboard)
+
+If the bug is a duplicate of another bug, reply with:
+#syz dup: exact-subject-of-another-report
+
+If you want to undo deduplication, reply with:
+#syz undup`,
 			extBugID2, crashLogLink, kernelConfigLink, reproSyzLink, reproCLink,
 			bisectLogLink, bisectCrashReportLink, bisectCrashLogLink))
 	}

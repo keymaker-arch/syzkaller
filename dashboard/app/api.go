@@ -21,6 +21,7 @@ import (
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/asset"
 	"github.com/google/syzkaller/pkg/auth"
+	"github.com/google/syzkaller/pkg/debugtracer"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/subsystem"
@@ -231,8 +232,8 @@ func apiCommitPoll(c context.Context, ns string, r *http.Request, payload []byte
 	resp := &dashapi.CommitPollResp{
 		ReportEmail: reportEmail(c, ns),
 	}
-	for _, repo := range config.Namespaces[ns].Repos {
-		if repo.Obsolete {
+	for _, repo := range getKernelRepos(c, ns) {
+		if repo.NoPoll {
 			continue
 		}
 		resp.Repos = append(resp.Repos, dashapi.Repo{
@@ -773,7 +774,7 @@ func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, err
 	calculateSubsystems := save && (bug.NumCrashes == 0 ||
 		bug.ReproLevel == ReproLevelNone && reproLevel != ReproLevelNone)
 	if calculateSubsystems {
-		newSubsystems, err = inferSubsystems(c, bug, bugKey)
+		newSubsystems, err = inferSubsystems(c, bug, bugKey, &debugtracer.NullTracer{})
 		if err != nil {
 			log.Errorf(c, "%q: failed to extract subsystems: %s", bug.Title, err)
 			return nil, err
@@ -801,7 +802,7 @@ func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, err
 			bug.HasReport = true
 		}
 		if calculateSubsystems {
-			bug.SetAutoSubsystems(newSubsystems, now, getSubsystemRevision(c, ns))
+			bug.SetAutoSubsystems(c, newSubsystems, now, getSubsystemRevision(c, ns))
 		}
 		bug.increaseCrashStats(now)
 		bug.HappenedOn = mergeString(bug.HappenedOn, build.Manager)
@@ -835,8 +836,8 @@ func parseCrashAssets(c context.Context, req *dashapi.Crash) ([]Asset, error) {
 	return assets, nil
 }
 
-func (crash *Crash) UpdateReportingPriority(build *Build, bug *Bug) {
-	prio := int64(kernelRepoInfo(build).ReportingPriority) * 1e6
+func (crash *Crash) UpdateReportingPriority(c context.Context, build *Build, bug *Bug) {
+	prio := int64(kernelRepoInfo(c, build).ReportingPriority) * 1e6
 	divReproPrio := int64(1)
 	if crash.ReproIsRevoked {
 		divReproPrio = 10
@@ -888,7 +889,7 @@ func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKe
 	if crash.MachineInfo, err = putText(c, ns, textMachineInfo, req.MachineInfo, true); err != nil {
 		return err
 	}
-	crash.UpdateReportingPriority(build, bug)
+	crash.UpdateReportingPriority(c, build, bug)
 	crashKey := db.NewIncompleteKey(c, "Crash", bugKey)
 	if _, err = db.Put(c, crashKey, crash); err != nil {
 		return fmt.Errorf("failed to put crash: %v", err)
@@ -1554,19 +1555,6 @@ func checkClient(conf *GlobalConfig, name0, secretPassword, oauthSubject string)
 		}
 	}
 	return "", ErrAccess
-}
-
-func handleRetestRepros(w http.ResponseWriter, r *http.Request) {
-	c := appengine.NewContext(r)
-	for ns, cfg := range config.Namespaces {
-		if !cfg.RetestRepros {
-			continue
-		}
-		err := updateRetestReproJobs(c, ns)
-		if err != nil {
-			log.Errorf(c, "failed to update retest repro jobs for %s: %v", ns, err)
-		}
-	}
 }
 
 func handleRefreshSubsystems(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
@@ -34,6 +35,7 @@ type Manager struct {
 	FailedSyzBuildBug string
 	LastAlive         time.Time
 	CurrentUpTime     time.Duration
+	LastGeneratedJob  time.Time
 }
 
 // ManagerStats holds per-day manager runtime stats.
@@ -117,69 +119,131 @@ type Bug struct {
 	// bit 1 - don't want to publish it (syzkaller build/test errors)
 	KcidbStatus    int64
 	DailyStats     []BugDailyStats
-	Tags           BugTags
+	Labels         []BugLabel
 	DiscussionInfo []BugDiscussionInfo
+	TreeTests      BugTreeTestInfo
 }
 
-type BugTags struct {
-	Subsystems []BugSubsystem
+type BugTreeTestInfo struct {
+	// NeedPoll is set to true if this bug needs to be considered ASAP.
+	NeedPoll bool
+	// NextPoll can be used to delay the next inspection of the bug.
+	NextPoll time.Time
+	// List contains latest data about cross-tree patch tests.
+	List []BugTreeTest
 }
 
-type BugSubsystem struct {
-	// For now, let's keep the bare minimum number of fields.
-	// The subsystem names we use now are not stable and should not be relied upon.
-	Name string
+type BugTreeTest struct {
+	CrashID int64
+	Repo    string
+	Branch  string // May be also equal to a commit.
+	// If the values below are set, the testing was done on a merge base.
+	MergeBaseRepo   string
+	MergeBaseBranch string
+	// Below are job keys.
+	First      string // The first job that finished successfully.
+	FirstOK    string
+	FirstCrash string
+	Last       string
+	Error      string // If some job succeeds afterwards, it should be cleared.
+	Pending    string
+}
+
+type BugLabelType string
+
+type BugLabel struct {
+	Label BugLabelType
+	// Either empty (for flags) or contains the value.
+	Value string
 	// The email of the user who manually set this subsystem tag.
-	// If empty, the subsystem was set automatically.
+	// If empty, the label was set automatically.
 	SetBy string
+	// Link to the message.
+	Link string
 }
 
-func (bug *Bug) SetAutoSubsystems(list []*subsystem.Subsystem, now time.Time, rev int) {
-	objects := []BugSubsystem{}
-	for _, item := range list {
-		objects = append(objects, BugSubsystem{Name: item.Name})
+func (label BugLabel) String() string {
+	if label.Value == "" {
+		return string(label.Label)
 	}
+	return string(label.Label) + ":" + label.Value
+}
+
+func (bug *Bug) SetAutoSubsystems(c context.Context, list []*subsystem.Subsystem, now time.Time, rev int) {
 	bug.SubsystemsRev = rev
-	bug.SetSubsystems(objects, now)
-}
-
-func (bug *Bug) SetUserSubsystems(list []*subsystem.Subsystem, now time.Time, user string) {
-	objects := []BugSubsystem{}
-	for _, item := range list {
-		objects = append(objects, BugSubsystem{
-			Name:  item.Name,
-			SetBy: user,
-		})
-	}
-	bug.SetSubsystems(objects, now)
-}
-
-func (bug *Bug) SetSubsystems(list []BugSubsystem, now time.Time) {
-	bug.Tags.Subsystems = list
 	bug.SubsystemsTime = now
+	var objects []BugLabel
+	for _, item := range list {
+		objects = append(objects, BugLabel{Label: SubsystemLabel, Value: item.Name})
+	}
+	bug.SetLabels(makeLabelSet(c, bug.Namespace), objects)
+}
+
+func updateSingleBug(c context.Context, bugKey *db.Key, transform func(*Bug) error) error {
+	tx := func(c context.Context) error {
+		bug := new(Bug)
+		if err := db.Get(c, bugKey, bug); err != nil {
+			return fmt.Errorf("failed to get bug: %v", err)
+		}
+		err := transform(bug)
+		if err != nil {
+			return err
+		}
+		if _, err := db.Put(c, bugKey, bug); err != nil {
+			return fmt.Errorf("failed to put bug: %v", err)
+		}
+		return nil
+	}
+	return db.RunInTransaction(c, tx, &db.TransactionOptions{Attempts: 10})
 }
 
 func (bug *Bug) hasUserSubsystems() bool {
-	for _, item := range bug.Tags.Subsystems {
-		if item.SetBy != "" {
-			return true
-		}
-	}
-	return false
+	return bug.HasUserLabel(SubsystemLabel)
 }
 
-func (bug *Bug) hasSubsystem(name string) bool {
-	for _, item := range bug.Tags.Subsystems {
-		if item.Name == name {
-			return true
-		}
-	}
-	return false
+// Initially, subsystem labels were stored as Tags.Subsystems, but over time
+// it turned out that we'd better store all labels together.
+// Let's keep this conversion code until "Tags" are removed from all bugs.
+// Then it can be removed.
+
+type Bug202304 struct {
+	Tags BugTags202304
 }
 
-func (bug *Bug) Load(ps []db.Property) error {
+type BugTags202304 struct {
+	Subsystems []BugTag202304
+}
+
+type BugTag202304 struct {
+	Name  string
+	SetBy string
+}
+
+func (bug *Bug) Load(origProps []db.Property) error {
+	// First filer out Tag properties.
+	var tags, ps []db.Property
+	for _, p := range origProps {
+		if strings.HasPrefix(p.Name, "Tags.") {
+			tags = append(tags, p)
+		} else {
+			ps = append(ps, p)
+		}
+	}
 	if err := db.LoadStruct(bug, ps); err != nil {
 		return err
+	}
+	if len(tags) > 0 {
+		old := Bug202304{}
+		if err := db.LoadStruct(&old, tags); err != nil {
+			return err
+		}
+		for _, entry := range old.Tags.Subsystems {
+			bug.Labels = append(bug.Labels, BugLabel{
+				Label: SubsystemLabel,
+				SetBy: entry.SetBy,
+				Value: entry.Name,
+			})
+		}
 	}
 	headReproFound := false
 	for _, p := range ps {
@@ -478,6 +542,11 @@ type Job struct {
 	IsRunning   bool      // the job might have been started, but never finished
 	LastStarted time.Time `datastore:"Started"`
 	Finished    time.Time // if set, job is finished
+	TreeOrigin  bool      // whether the job is related to tree origin detection
+
+	// If patch test should be done on the merge base between two branches.
+	MergeBaseRepo   string
+	MergeBaseBranch string
 
 	// Result of execution:
 	CrashTitle  string // if empty, we did not hit crash during testing
@@ -730,21 +799,14 @@ func loadBuild(c context.Context, ns, id string) (*Build, error) {
 }
 
 func lastManagerBuild(c context.Context, ns, manager string) (*Build, error) {
-	var builds []*Build
-	_, err := db.NewQuery("Build").
-		Filter("Namespace=", ns).
-		Filter("Manager=", manager).
-		Filter("Type=", BuildNormal).
-		Order("-Time").
-		Limit(1).
-		GetAll(c, &builds)
+	mgr, err := loadManager(c, ns, manager)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manager build: %v", err)
+		return nil, err
 	}
-	if len(builds) == 0 {
+	if mgr.CurrentBuild == "" {
 		return nil, fmt.Errorf("failed to fetch manager build: no builds")
 	}
-	return builds[0], nil
+	return loadBuild(c, ns, mgr.CurrentBuild)
 }
 
 func (bug *Bug) displayTitle() string {
@@ -928,13 +990,13 @@ func removeCrashReference(c context.Context, crashID int64, bugKey *db.Key,
 	return nil
 }
 
-func kernelRepoInfo(build *Build) KernelRepo {
-	return kernelRepoInfoRaw(build.Namespace, build.KernelRepo, build.KernelBranch)
+func kernelRepoInfo(c context.Context, build *Build) KernelRepo {
+	return kernelRepoInfoRaw(c, build.Namespace, build.KernelRepo, build.KernelBranch)
 }
 
-func kernelRepoInfoRaw(ns, url, branch string) KernelRepo {
+func kernelRepoInfoRaw(c context.Context, ns, url, branch string) KernelRepo {
 	var info KernelRepo
-	for _, repo := range config.Namespaces[ns].Repos {
+	for _, repo := range getKernelRepos(c, ns) {
 		if repo.URL == url && repo.Branch == branch {
 			info = repo
 			break
