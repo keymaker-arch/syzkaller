@@ -714,17 +714,19 @@ static void initialize_tun(void)
 	if (sock == -1)
 		fail("socket(AF_NETLINK) failed");
 
+	// bring up the NIC first, or we cannot add neighbor entry
 	netlink_add_addr4(&nlmsg, sock, TUN_IFACE, LOCAL_IPV4);
 	netlink_add_addr6(&nlmsg, sock, TUN_IFACE, LOCAL_IPV6);
-	uint64 macaddr = REMOTE_MAC;
+	uint64 macaddr = LOCAL_MAC;
+	netlink_device_change(&nlmsg, sock, TUN_IFACE, true, 0, &macaddr, ETH_ALEN, NULL);
+	macaddr = REMOTE_MAC;
 	struct in_addr in_addr;
 	inet_pton(AF_INET, REMOTE_IPV4, &in_addr);
 	netlink_add_neigh(&nlmsg, sock, TUN_IFACE, &in_addr, sizeof(in_addr), &macaddr, ETH_ALEN);
 	struct in6_addr in6_addr;
 	inet_pton(AF_INET6, REMOTE_IPV6, &in6_addr);
 	netlink_add_neigh(&nlmsg, sock, TUN_IFACE, &in6_addr, sizeof(in6_addr), &macaddr, ETH_ALEN);
-	macaddr = LOCAL_MAC;
-	netlink_device_change(&nlmsg, sock, TUN_IFACE, true, 0, &macaddr, ETH_ALEN, NULL);
+
 	close(sock);
 }
 #endif
@@ -1476,6 +1478,11 @@ static void netlink_nicvf_setup(void)
 // Create/up as many as we can.
 static void initialize_netdevices(void)
 {
+	// a routing entry(172.20.20.0/24) will be added after executing this function, that bring all packets to the sit0 NIC
+	// which should be sent to the tun NIC. And we don't need to initialize any netdevices in our case. This function is invoked in 
+	// several do_sandbox_XX function, not sure which is invoked in our case, so let this function do nothing and return.
+	// FIXME: this is definitely a bug, give a more graceful fix
+	return;
 #if SYZ_EXECUTOR
 	if (!flag_net_devices)
 		return;
