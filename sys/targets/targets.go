@@ -46,6 +46,10 @@ type Target struct {
 	timeouts Timeouts
 }
 
+func (target *Target) HasCallNumber(callName string) bool {
+	return target.SyscallNumbers && !strings.HasPrefix(callName, "syz_")
+}
+
 type osCommon struct {
 	// What OS can build native binaries for this OS.
 	// If not set, defaults to itself (i.e. native build).
@@ -536,7 +540,7 @@ var oses = map[string]osCommon{
 		KernelObject:           "netbsd.gdb",
 	},
 	OpenBSD: {
-		SyscallNumbers:         true,
+		SyscallNumbers:         false,
 		SyscallPrefix:          "SYS_",
 		ExecutorUsesShmem:      true,
 		ExecutorUsesForkServer: true,

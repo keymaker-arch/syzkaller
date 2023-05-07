@@ -217,6 +217,12 @@ func (c *Ctx) setSubsystems(ns string, list []*subsystem.Subsystem, rev int) {
 	}
 }
 
+func (c *Ctx) setKernelRepos(list []KernelRepo) {
+	c.transformContext = func(c context.Context) context.Context {
+		return contextWithRepos(c, list)
+	}
+}
+
 // GET sends admin-authorized HTTP GET request to the app.
 func (c *Ctx) GET(url string) ([]byte, error) {
 	return c.AuthGET(AccessAdmin, url)
@@ -384,11 +390,6 @@ func (c *Ctx) expectNoEmail() {
 		c.t.Helper()
 		c.t.Fatalf("got unexpected email: %v\n%s", msg.Subject, msg.Body)
 	}
-}
-
-func (c *Ctx) updRetestReproJobs() {
-	_, err := c.GET("/cron/retest_repros")
-	c.expectOK(err)
 }
 
 type apiClient struct {

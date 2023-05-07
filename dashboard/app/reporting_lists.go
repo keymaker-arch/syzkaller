@@ -264,6 +264,17 @@ func querySubsystemReport(c context.Context, subsystem *Subsystem, reporting *Re
 			// Don't take bugs which are too new -- they're still fresh in memory.
 			continue
 		}
+		discussions := bug.discussionSummary()
+		if discussions.ExternalMessages > 0 &&
+			discussions.LastMessage.After(timeNow(c).Add(-config.UserReplyFrist)) {
+			// Don't take bugs with recent user replies.
+			// As we don't keep exactly the date of the last user message, approximate it.
+			continue
+		}
+		if bug.HasLabel(NoRemindersLabel, "") {
+			// The bug was intentionally excluded from monthly reminders.
+			continue
+		}
 		if bug.ReproLevel == dashapi.ReproLevelNone {
 			noRepro = append(noRepro, bug)
 		} else {
@@ -333,7 +344,8 @@ func queryMatchingBugs(c context.Context, ns, name string, accessLevel AccessLev
 	allOpenBugs, _, err := loadAllBugs(c, func(query *db.Query) *db.Query {
 		return query.Filter("Namespace=", ns).
 			Filter("Status=", BugStatusOpen).
-			Filter("Tags.Subsystems.Name=", name)
+			Filter("Labels.Label=", SubsystemLabel).
+			Filter("Labels.Value=", name)
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query open bugs for subsystem: %w", err)
@@ -341,7 +353,8 @@ func queryMatchingBugs(c context.Context, ns, name string, accessLevel AccessLev
 	allFixedBugs, _, err := loadAllBugs(c, func(query *db.Query) *db.Query {
 		return query.Filter("Namespace=", ns).
 			Filter("Status=", BugStatusFixed).
-			Filter("Tags.Subsystems.Name=", name)
+			Filter("Labels.Label=", SubsystemLabel).
+			Filter("Labels.Value=", name)
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query fixed bugs for subsystem: %w", err)
@@ -418,6 +431,7 @@ func reportingBugListReport(c context.Context, subsystemReport *SubsystemReport,
 		}
 		ret := &dashapi.BugListReport{
 			ID:          stage.ID,
+			Created:     subsystemReport.Created,
 			Config:      configJSON,
 			Link:        fmt.Sprintf("%v/%s/s/%s", appURL(c), ns, name),
 			Subsystem:   name,

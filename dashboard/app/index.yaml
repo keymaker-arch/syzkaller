@@ -41,9 +41,9 @@ indexes:
 
 - kind: Bug
   properties:
-  - name: Namespace
   - name: Status
-  - name: LastTime
+  - name: HappenedOn
+  - name: HeadReproLevel
 
 - kind: Bug
   properties:
@@ -115,7 +115,8 @@ indexes:
 - kind: Bug
   properties:
   - name: Namespace
-  - name: Tags.Subsystems.Name
+  - name: Labels.Label
+  - name: Labels.Value
   - name: Status
 
 - kind: Build

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/syzkaller/pkg/debugtracer"
 	"github.com/google/syzkaller/pkg/subsystem"
 	"golang.org/x/net/context"
 	db "google.golang.org/appengine/v2/datastore"
@@ -38,7 +39,7 @@ func reassignBugSubsystems(c context.Context, ns string, count int) error {
 			err = updateBugSubsystems(c, bugKey, nil, updateRevision(rev))
 		} else {
 			var list []*subsystem.Subsystem
-			list, err = inferSubsystems(c, bugs[i], bugKey)
+			list, err = inferSubsystems(c, bugs[i], bugKey, &debugtracer.NullTracer{})
 			if err != nil {
 				return fmt.Errorf("failed to infer subsystems: %w", err)
 			}
@@ -90,49 +91,38 @@ func bugsToUpdateSubsystems(c context.Context, ns string, count int) ([]*Bug, []
 }
 
 func checkOutdatedSubsystems(c context.Context, service *subsystem.Service, bug *Bug) {
-	for _, item := range bug.Tags.Subsystems {
-		if service.ByName(item.Name) == nil {
-			log.Errorf(c, "ns=%s bug=%s subsystem %s no longer exists", bug.Namespace, bug.Title, item.Name)
+	for _, item := range bug.LabelValues(SubsystemLabel) {
+		if service.ByName(item.Value) == nil {
+			log.Errorf(c, "ns=%s bug=%s subsystem %s no longer exists", bug.Namespace, bug.Title, item.Value)
 		}
 	}
 }
 
 type (
 	autoInference  int
-	userAssignment string
 	updateRevision int
 )
 
 func updateBugSubsystems(c context.Context, bugKey *db.Key,
 	list []*subsystem.Subsystem, info interface{}) error {
 	now := timeNow(c)
-	tx := func(c context.Context) error {
-		bug := new(Bug)
-		if err := db.Get(c, bugKey, bug); err != nil {
-			return fmt.Errorf("failed to get bug: %v", err)
-		}
+	return updateSingleBug(c, bugKey, func(bug *Bug) error {
 		switch v := info.(type) {
 		case autoInference:
 			logSubsystemChange(c, bug, list)
-			bug.SetAutoSubsystems(list, now, int(v))
-		case userAssignment:
-			bug.SetUserSubsystems(list, now, string(v))
+			bug.SetAutoSubsystems(c, list, now, int(v))
 		case updateRevision:
 			bug.SubsystemsRev = int(v)
 			bug.SubsystemsTime = now
 		}
-		if _, err := db.Put(c, bugKey, bug); err != nil {
-			return fmt.Errorf("failed to put bug: %v", err)
-		}
 		return nil
-	}
-	return db.RunInTransaction(c, tx, &db.TransactionOptions{Attempts: 10})
+	})
 }
 
 func logSubsystemChange(c context.Context, bug *Bug, new []*subsystem.Subsystem) {
 	var oldNames, newNames []string
-	for _, item := range bug.Tags.Subsystems {
-		oldNames = append(oldNames, item.Name)
+	for _, item := range bug.LabelValues(SubsystemLabel) {
+		oldNames = append(oldNames, item.Value)
 	}
 	for _, item := range new {
 		newNames = append(newNames, item.Name)
@@ -153,7 +143,8 @@ const (
 )
 
 // inferSubsystems determines the best yet possible estimate of the bug's subsystems.
-func inferSubsystems(c context.Context, bug *Bug, bugKey *db.Key) ([]*subsystem.Subsystem, error) {
+func inferSubsystems(c context.Context, bug *Bug, bugKey *db.Key,
+	tracer debugtracer.DebugTracer) ([]*subsystem.Subsystem, error) {
 	service := getSubsystemService(c, bug.Namespace)
 	if service == nil {
 		// There's nothing we can do.
@@ -179,7 +170,7 @@ func inferSubsystems(c context.Context, bug *Bug, bugKey *db.Key) ([]*subsystem.
 		}
 		crashes = append(crashes, crash)
 	}
-	return service.Extract(crashes), nil
+	return service.TracedExtract(crashes, tracer), nil
 }
 
 // subsystemMaintainers queries the list of emails to send the bug to.
@@ -224,4 +215,11 @@ func getSubsystemRevision(c context.Context, ns string) int {
 		return val.revision
 	}
 	return config.Namespaces[ns].Subsystems.Revision
+}
+
+func subsystemListURL(c context.Context, ns string) string {
+	if getSubsystemService(c, ns) == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v/%v/subsystems?all=true", appURL(c), ns)
 }

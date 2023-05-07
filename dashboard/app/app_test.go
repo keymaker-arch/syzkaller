@@ -80,16 +80,16 @@ var testConfig = &GlobalConfig{
 				{
 					URL:    "git://github.com/google/syzkaller",
 					Branch: "master",
-					Alias:  "repo10alias",
+					Alias:  "repo10alias1",
 					CC: CCConfig{
 						Maintainers: []string{"maintainers@repo10.org", "bugs@repo10.org"},
 					},
 				},
 				{
-					URL:      "git://github.com/google/syzkaller",
-					Branch:   "old_master",
-					Alias:    "repo10alias",
-					Obsolete: true,
+					URL:    "git://github.com/google/syzkaller",
+					Branch: "old_master",
+					Alias:  "repo10alias2",
+					NoPoll: true,
 				},
 			},
 			Managers: map[string]ConfigManager{
@@ -190,7 +190,6 @@ var testConfig = &GlobalConfig{
 					},
 				},
 			},
-			RetestRepros: true,
 		},
 		// Namespaces for access level testing.
 		"access-admin": {
@@ -254,9 +253,10 @@ var testConfig = &GlobalConfig{
 			},
 			Repos: []KernelRepo{
 				{
-					URL:    "git://syzkaller.org/access-public.git",
-					Branch: "access-public",
-					Alias:  "access-public",
+					URL:                    "git://syzkaller.org/access-public.git",
+					Branch:                 "access-public",
+					Alias:                  "access-public",
+					DetectMissingBackports: true,
 				},
 			},
 			Reporting: []Reporting{
@@ -272,6 +272,7 @@ var testConfig = &GlobalConfig{
 					Config:     &TestConfig{Index: 2},
 				},
 			},
+			FindBugOriginTrees: true,
 		},
 		"access-public-email": {
 			AccessLevel: AccessPublic,
@@ -304,6 +305,7 @@ var testConfig = &GlobalConfig{
 					},
 				},
 			},
+			RetestRepros: true,
 			Subsystems: SubsystemsConfig{
 				Service: subsystem.MustMakeService(testSubsystems),
 			},
