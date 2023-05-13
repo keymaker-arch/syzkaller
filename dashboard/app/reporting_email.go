@@ -629,7 +629,7 @@ func handleBugCommand(c context.Context, bugInfo *bugInfoResult, msg *email.Emai
 }
 
 func processDiscussionEmail(c context.Context, msg *email.Email, source dashapi.DiscussionSource) error {
-	log.Debugf(c, "processDiscussionEmail: %#v, source %v", msg, source)
+	log.Debugf(c, "processDiscussionEmail %s from source %v", msg.MessageID, source)
 	if len(msg.BugIDs) == 0 {
 		return nil
 	}
@@ -637,7 +637,7 @@ func processDiscussionEmail(c context.Context, msg *email.Email, source dashapi.
 	if len(msg.BugIDs) > limitIDs {
 		msg.BugIDs = msg.BugIDs[:limitIDs]
 	}
-	log.Infof(c, "saving to discussions for %q", msg.BugIDs)
+	log.Debugf(c, "saving to discussions for %q", msg.BugIDs)
 	dType := dashapi.DiscussionMention
 	if source == dashapi.DiscussionLore {
 		dType = lore.DiscussionType(msg)
@@ -747,12 +747,10 @@ func handleSetCommand(c context.Context, bug *Bug, msg *email.Email,
 		return fmt.Sprintf(setBugCmdFormat, labelSet.Help())
 	}
 	label, values := BugLabelType(match[1]), match[2]
-	log.Infof(c, "label=%s values=%s", label, values)
+	log.Infof(c, "bug=%q label=%s values=%s", bug.displayTitle(), label, values)
 	if !labelSet.FindLabel(label) {
 		return fmt.Sprintf(setCmdUnknownLabel, label, labelSet.Help())
 	}
-
-	log.Infof(c, "setting %#v values for %q (label %q)", values, bug.displayTitle(), label)
 	var labels []BugLabel
 	for _, value := range unique(setCmdArgSplitRe.Split(values, -1)) {
 		labels = append(labels, BugLabel{
@@ -1090,7 +1088,7 @@ func matchBugFromList(c context.Context, sender, subject string) (*bugInfoResult
 			log.Infof(c, "access denied")
 			continue
 		}
-		reporting, bugReporting, _, _, err := currentReporting(c, bug)
+		reporting, bugReporting, _, _, err := currentReporting(bug)
 		if err != nil || reporting == nil {
 			log.Infof(c, "could not query reporting: %s", err)
 			continue

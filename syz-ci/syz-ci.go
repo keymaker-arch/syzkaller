@@ -83,7 +83,9 @@ type Config struct {
 	Name string `json:"name"`
 	HTTP string `json:"http"`
 	// If manager http address is not specified, give it an address starting from this port. Optional.
-	ManagerPort     int    `json:"manager_port_start"`
+	ManagerPort int `json:"manager_port_start"`
+	// If manager rpc address is not specified, give it addresses starting from this port. By default 30000.
+	RPCPort         int    `json:"rpc_port_start"`
 	DashboardAddr   string `json:"dashboard_addr"`   // Optional.
 	DashboardClient string `json:"dashboard_client"` // Optional.
 	DashboardKey    string `json:"dashboard_key"`    // Optional.
@@ -207,6 +209,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+	log.SetName(cfg.Name)
 
 	shutdownPending := make(chan struct{})
 	osutil.HandleInterrupts(shutdownPending)
@@ -235,7 +238,7 @@ func main() {
 	for _, mgrcfg := range cfg.Managers {
 		mgr, err := createManager(cfg, mgrcfg, stop, *flagDebug)
 		if err != nil {
-			log.Logf(0, "failed to create manager %v: %v", mgrcfg.Name, err)
+			log.Errorf("failed to create manager %v: %v", mgrcfg.Name, err)
 			continue
 		}
 		managers = append(managers, mgr)
@@ -302,8 +305,7 @@ func deprecateAssets(cfg *Config, stop chan struct{}, wg *sync.WaitGroup) {
 	}
 	storage, err := asset.StorageFromConfig(cfg.AssetStorage, dash)
 	if err != nil {
-		dash.LogError("syz-ci",
-			"failed to create asset storage during asset deprecation: %v", err)
+		log.Errorf("failed to create asset storage during asset deprecation: %v", err)
 		return
 	}
 loop:
@@ -317,7 +319,7 @@ loop:
 		log.Logf(0, "deprecating assets")
 		err := storage.DeprecateAssets()
 		if err != nil {
-			dash.LogError("syz-ci", "asset deprecation failed: %v", err)
+			log.Errorf("asset deprecation failed: %v", err)
 		}
 	}
 }
@@ -339,6 +341,7 @@ func loadConfig(filename string) (*Config, error) {
 		SyzkallerRepo:    "https://github.com/google/syzkaller.git",
 		SyzkallerBranch:  "master",
 		ManagerPort:      10000,
+		RPCPort:          30000,
 		Goroot:           os.Getenv("GOROOT"),
 		JobPollPeriod:    10,
 		CommitPollPeriod: 3600,
@@ -418,6 +421,10 @@ func loadManagerConfig(cfg *Config, mgr *ManagerConfig) error {
 	if managercfg.HTTP == "" {
 		managercfg.HTTP = fmt.Sprintf(":%v", cfg.ManagerPort)
 		cfg.ManagerPort++
+	}
+	if managercfg.RPC == "" {
+		managercfg.RPC = fmt.Sprintf(":%v", cfg.RPCPort)
+		cfg.RPCPort++
 	}
 	// Note: we don't change Compiler/Ccache because it may be just "gcc" referring
 	// to the system binary, or pkg/build/netbsd.go uses "g++" and "clang++" as special marks.

@@ -94,16 +94,17 @@ Use of this source code is governed by Apache 2 LICENSE that can be found in the
 {{if .Filter.Any}}
 	<b>Applied filters: </b>
 	{{if .Filter.Manager}}
-		Manager={{.Filter.Manager}} ({{link (call .DropURL "manager") "drop"}})
+		Manager={{.Filter.Manager}} ({{link (call .DropURL "manager" "") "drop"}})
 	{{end}}
 	{{if .Filter.OnlyManager}}
-		Only Manager={{.Filter.OnlyManager}} ({{link (call .DropURL "only_manager") "drop"}})
+		Only Manager={{.Filter.OnlyManager}} ({{link (call .DropURL "only_manager" "") "drop"}})
 	{{end}}
 	{{if .Filter.NoSubsystem}}
-		NoSubsystem={{.Filter.NoSubsystem}} ({{link (call .DropURL "no_subsystem") "drop"}})
+		NoSubsystem={{.Filter.NoSubsystem}} ({{link (call .DropURL "no_subsystem" "") "drop"}})
 	{{end}}
-	{{if .Filter.Label}}
-		Label={{.Filter.Label}} ({{link (call .DropURL "label") "drop"}})
+	{{$drop := .DropURL}}
+	{{range .Filter.Labels}}
+		Label={{.}} ({{link (call $drop "label" .) "drop"}})
 	{{end}}
 	<br>
 {{end}}
@@ -537,6 +538,47 @@ Use of this source code is governed by Apache 2 LICENSE that can be found in the
 			<td>{{link $item.Link $item.Subject}}</td>
 			<td class="stat">{{$item.External}} ({{$item.Total}})</td>
 			<td class="stat">{{formatTime $item.Last}}</td>
+		</tr>
+	{{end}}
+	</tbody>
+</table>
+{{end}}
+{{end}}
+
+{{/* List of test results, invoked with []*dashapi.JobInfo */}}
+{{define "test_results"}}
+{{if .}}
+<table class="list_table">
+	<thead>
+	<tr>
+		<th>Date</th>
+		<th>Name</th>
+		<th>Commit</th>
+		<th>Repro</th>
+		<th>Result</th>
+	</tr>
+	</thead>
+	<tbody>
+	{{range $item := .}}
+		<tr>
+			<td>{{formatDate $item.Finished}}</td>
+			<td>{{$item.KernelAlias}} {{if $item.OnMergeBase}}(merge base){{else}}(ToT){{end}}</td>
+			<td class="stat">{{link $item.KernelCommitLink (formatTagHash $item.KernelCommit)}}</td>
+			<td>
+				{{if $item.ReproCLink}}<a href="{{$item.ReproCLink}}">C</a>
+				{{else if $item.ReproSyzLink}}<a href="{{$item.ReproSyzLink}}">C</a>{{end}}
+			</td>
+			{{if ne $item.CrashTitle ""}}
+			<td class="status-crashed">
+				{{link $item.CrashReportLink "[report]"}} <i>{{$item.CrashTitle}}</i>
+			</td>
+			{{else if ne $item.ErrorLink ""}}
+			<td class="status-error">
+				Failed due to {{link $item.ErrorLink "an error"}}; will retry later
+			</td>
+			{{else}}
+			<td class="status-ok">Didn't crash</td>
+                        {{end}}
 		</tr>
 	{{end}}
 	</tbody>

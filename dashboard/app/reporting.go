@@ -95,7 +95,7 @@ func handleReportBug(c context.Context, typ string, state *ReportingState, bug *
 func needReport(c context.Context, typ string, state *ReportingState, bug *Bug) (
 	reporting *Reporting, bugReporting *BugReporting, reportingIdx int,
 	status, link string, err error) {
-	reporting, bugReporting, reportingIdx, status, err = currentReporting(c, bug)
+	reporting, bugReporting, reportingIdx, status, err = currentReporting(bug)
 	if err != nil || reporting == nil {
 		return
 	}
@@ -186,7 +186,7 @@ func reportingPollNotifications(c context.Context, typ string) []*dashapi.BugNot
 }
 
 func handleReportNotif(c context.Context, typ string, bug *Bug) (*dashapi.BugNotification, error) {
-	reporting, bugReporting, _, _, err := currentReporting(c, bug)
+	reporting, bugReporting, _, _, err := currentReporting(bug)
 	if err != nil || reporting == nil {
 		return nil, nil
 	}
@@ -339,7 +339,7 @@ func createNotification(c context.Context, typ dashapi.BugNotif, public bool, te
 	return notif, nil
 }
 
-func currentReporting(c context.Context, bug *Bug) (*Reporting, *BugReporting, int, string, error) {
+func currentReporting(bug *Bug) (*Reporting, *BugReporting, int, string, error) {
 	if bug.NumCrashes == 0 {
 		// This is possible during the short window when we already created a bug,
 		// but did not attach the first crash to it yet. We need to avoid reporting this bug yet
@@ -1044,13 +1044,13 @@ func checkBugStatus(c context.Context, cmd *dashapi.BugUpdate, bug *Bug, bugRepo
 				// This happens when people discuss old bugs.
 				log.Infof(c, "Dup bug is already closed")
 			} else {
-				log.Errorf(c, "Dup bug is already closed")
+				log.Warningf(c, "incoming command %v: dup bug is already closed", cmd.ID)
 			}
 			return false, "", nil
 		}
 	case BugStatusFixed, BugStatusInvalid:
 		if cmd.Status != dashapi.BugStatusUpdate {
-			log.Errorf(c, "This bug is already closed")
+			log.Errorf(c, "incoming command %v: bug is already closed", cmd.ID)
 		}
 		return false, "", nil
 	default:
@@ -1058,7 +1058,7 @@ func checkBugStatus(c context.Context, cmd *dashapi.BugUpdate, bug *Bug, bugRepo
 	}
 	if !bugReporting.Closed.IsZero() {
 		if cmd.Status != dashapi.BugStatusUpdate {
-			log.Errorf(c, "This bug reporting is already closed")
+			log.Errorf(c, "incoming command %v: bug reporting is already closed", cmd.ID)
 		}
 		return false, "", nil
 	}
@@ -1331,7 +1331,7 @@ func loadFullBugInfo(c context.Context, bug *Bug, bugKey *db.Key,
 		return nil, err
 	}
 	for _, similarBug := range similar {
-		_, bugReporting, _, _, _ := currentReporting(c, similarBug)
+		_, bugReporting, _, _, _ := currentReporting(similarBug)
 		if bugReporting == nil {
 			continue
 		}

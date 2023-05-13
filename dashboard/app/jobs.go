@@ -574,7 +574,12 @@ func findBugsForBisection(c context.Context, managers map[string]bool,
 		if crash == nil {
 			continue
 		}
-		if jobType == JobBisectFix && timeSince(c, bug.LastTime) < 24*30*time.Hour {
+		const fixJobRepeat = 24 * 30 * time.Hour
+		if jobType == JobBisectFix && timeSince(c, bug.LastTime) < fixJobRepeat {
+			continue
+		}
+		const causeJobRepeat = 24 * 7 * time.Hour
+		if jobType == JobBisectCause && timeSince(c, bug.LastCauseBisect) < causeJobRepeat {
 			continue
 		}
 		return createBisectJobForBug(c, bug, crash, keys[bi], crashKey, jobType)
@@ -998,19 +1003,29 @@ func updateBugBisection(c context.Context, job *Job, jobKey *db.Key, req *dashap
 	}
 	if job.Type == JobBisectCause {
 		bug.BisectCause = result
+		bug.LastCauseBisect = now
 	} else {
 		bug.BisectFix = result
 	}
+	infraError := (req.Flags & dashapi.BisectResultInfraError) == dashapi.BisectResultInfraError
+	if infraError {
+		log.Errorf(c, "bisection of %q failed due to infra errors", job.BugTitle)
+	}
 	// If the crash still occurs on HEAD, update the bug's LastTime so that it will be
 	// retried after 30 days.
-	if job.Type == JobBisectFix && req.Error == nil && len(req.Commits) == 0 && len(req.CrashLog) != 0 {
+	if job.Type == JobBisectFix && (result != BisectError || infraError) &&
+		len(req.Commits) == 0 && len(req.CrashLog) != 0 {
 		bug.BisectFix = BisectNot
 		bug.LastTime = now
+	}
+	// If the cause bisection failed due to infrastructure problems, also repeat it.
+	if job.Type == JobBisectCause && infraError {
+		bug.BisectCause = BisectNot
 	}
 	if _, err := db.Put(c, bugKey, bug); err != nil {
 		return fmt.Errorf("failed to put bug: %v", err)
 	}
-	_, bugReporting, _, _, _ := currentReporting(c, bug)
+	_, bugReporting, _, _, _ := currentReporting(bug)
 	// The bug is either already closed or not yet reported in the current reporting,
 	// either way we don't need to report it. If it wasn't reported, it will be reported
 	// with the bisection results.
@@ -1365,14 +1380,78 @@ func jobID2Key(c context.Context, id string) (*db.Key, error) {
 	return jobKey, nil
 }
 
-func fetchJob(c context.Context, key string) (*Job, error) {
+func fetchJob(c context.Context, key string) (*Job, *db.Key, error) {
 	jobKey, err := db.DecodeKey(key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	job := new(Job)
 	if err := db.Get(c, jobKey, job); err != nil {
-		return nil, fmt.Errorf("failed to get job: %v", err)
+		return nil, nil, fmt.Errorf("failed to get job: %v", err)
 	}
-	return job, nil
+	return job, jobKey, nil
+}
+
+func makeJobInfo(c context.Context, job *Job, jobKey *db.Key, bug *Bug, build *Build,
+	crash *Crash) *dashapi.JobInfo {
+	kernelRepo, kernelCommit := job.KernelRepo, job.KernelBranch
+	if build != nil {
+		kernelRepo, kernelCommit = build.KernelRepo, build.KernelCommit
+	}
+	info := &dashapi.JobInfo{
+		Type:             dashapi.JobType(job.Type),
+		Flags:            dashapi.JobDoneFlags(job.Flags),
+		Created:          job.Created,
+		BugLink:          bugLink(jobKey.Parent().StringID()),
+		ExternalLink:     job.Link,
+		User:             job.User,
+		Reporting:        job.Reporting,
+		Namespace:        job.Namespace,
+		Manager:          job.Manager,
+		BugTitle:         job.BugTitle,
+		KernelAlias:      kernelRepoInfoRaw(c, job.Namespace, job.KernelRepo, job.KernelBranch).Alias,
+		KernelCommit:     kernelCommit,
+		KernelCommitLink: vcs.CommitLink(kernelRepo, kernelCommit),
+		PatchLink:        textLink(textPatch, job.Patch),
+		Attempts:         job.Attempts,
+		Started:          job.LastStarted,
+		Finished:         job.Finished,
+		CrashTitle:       job.CrashTitle,
+		CrashLogLink:     textLink(textCrashLog, job.CrashLog),
+		CrashReportLink:  textLink(textCrashReport, job.CrashReport),
+		LogLink:          textLink(textLog, job.Log),
+		ErrorLink:        textLink(textError, job.Error),
+		Reported:         job.Reported,
+		TreeOrigin:       job.TreeOrigin,
+		OnMergeBase:      job.MergeBaseRepo != "",
+	}
+	if !job.Finished.IsZero() {
+		info.Duration = job.Finished.Sub(job.LastStarted)
+	}
+	if job.Type == JobBisectCause || job.Type == JobBisectFix {
+		// We don't report these yet (or at all), see pollCompletedJobs.
+		if len(job.Commits) != 1 ||
+			bug != nil && (len(bug.Commits) != 0 || bug.Status != BugStatusOpen) {
+			info.Reported = true
+		}
+	}
+	for _, com := range job.Commits {
+		info.Commits = append(info.Commits, &dashapi.Commit{
+			Hash:   com.Hash,
+			Title:  com.Title,
+			Author: fmt.Sprintf("%v <%v>", com.AuthorName, com.Author),
+			CC:     strings.Split(com.CC, "|"),
+			Date:   com.Date,
+			Link:   vcs.CommitLink(kernelRepo, com.Hash),
+		})
+	}
+	if len(info.Commits) == 1 {
+		info.Commit = info.Commits[0]
+		info.Commits = nil
+	}
+	if crash != nil {
+		info.ReproCLink = externalLink(c, textReproC, crash.ReproC)
+		info.ReproSyzLink = externalLink(c, textReproSyz, crash.ReproSyz)
+	}
+	return info
 }

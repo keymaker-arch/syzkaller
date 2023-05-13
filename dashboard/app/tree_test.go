@@ -43,6 +43,9 @@ func TestTreeOriginDownstream(t *testing.T) {
 	c.expectEQ(ctx.entries[0].jobsDone, 1)
 	c.expectEQ(ctx.entries[1].jobsDone, 1)
 	c.expectEQ(ctx.entries[2].jobsDone, 1)
+	// Test that we can render the bug page.
+	_, err := c.GET(ctx.bugLink())
+	c.expectEQ(err, nil)
 }
 
 func TestTreeOriginLts(t *testing.T) {
@@ -93,25 +96,25 @@ func TestTreeOriginErrors(t *testing.T) {
 			mergeAlias: `downstream`,
 			results: []treeTestEntryPeriod{
 				{fromDay: 0, result: treeTestError},
-				{fromDay: 31, result: treeTestCrash},
+				{fromDay: 16, result: treeTestCrash},
 			},
 		},
 		{
 			alias: `upstream`,
 			results: []treeTestEntryPeriod{
 				{fromDay: 0, result: treeTestError},
-				{fromDay: 60, result: treeTestCrash},
+				{fromDay: 31, result: treeTestCrash},
 			},
 		},
 	}
-	ctx.jobTestDays = []int{1, 32, 63}
+	ctx.jobTestDays = []int{1, 16, 31}
 	ctx.moveToDay(1)
 	ctx.ensureLabels() // Not enough information yet.
-	// The original crash is reproducible again.
-	ctx.moveToDay(32)
+	// Lts got unbroken.
+	ctx.moveToDay(16)
 	ctx.ensureLabels(`origin:lts`) // We don't know any better so far.
-	// Upstream is buildable again.
-	ctx.moveToDay(63)
+	// Upstream got unbroken.
+	ctx.moveToDay(31)
 	ctx.ensureLabels(`origin:upstream`)
 	c.expectEQ(ctx.entries[0].jobsDone, 0)
 	c.expectEQ(ctx.entries[1].jobsDone, 2)
@@ -424,7 +427,7 @@ func TestMissingLtsBackport(t *testing.T) {
 			alias: `lts`,
 			results: []treeTestEntryPeriod{
 				{fromDay: 0, result: treeTestCrash},
-				{fromDay: 31, result: treeTestOK},
+				{fromDay: 46, result: treeTestOK},
 			},
 		},
 		{
@@ -434,8 +437,8 @@ func TestMissingLtsBackport(t *testing.T) {
 			},
 		},
 	}
-	ctx.jobTestDays = []int{0, 35}
-	ctx.moveToDay(35)
+	ctx.jobTestDays = []int{0, 46}
+	ctx.moveToDay(46)
 	ctx.ensureLabels(`missing-backport`)
 	c.expectEQ(ctx.entries[0].jobsDone, 1)
 	c.expectEQ(ctx.entries[1].jobsDone, 1)
@@ -470,8 +473,8 @@ func TestMissingUpstreamBackport(t *testing.T) {
 			},
 		},
 	}
-	ctx.jobTestDays = []int{0, 35}
-	ctx.moveToDay(35)
+	ctx.jobTestDays = []int{0, 46}
+	ctx.moveToDay(46)
 	ctx.ensureLabels(`missing-backport`)
 	c.expectEQ(ctx.entries[0].jobsDone, 1)
 	c.expectEQ(ctx.entries[1].jobsDone, 2)
@@ -511,8 +514,8 @@ func TestNotMissingBackport(t *testing.T) {
 			},
 		},
 	}
-	ctx.jobTestDays = []int{0, 35}
-	ctx.moveToDay(35)
+	ctx.jobTestDays = []int{0, 46}
+	ctx.moveToDay(46)
 	ctx.ensureLabels()
 	c.expectEQ(ctx.entries[0].jobsDone, 0)
 	c.expectEQ(ctx.entries[1].jobsDone, 1)
@@ -728,6 +731,10 @@ func (ctx *treeTestCtx) ensureLabels(labels ...string) {
 	sort.Strings(bugLabels)
 	sort.Strings(labels)
 	ctx.ctx.expectEQ(labels, bugLabels)
+}
+
+func (ctx *treeTestCtx) bugLink() string {
+	return fmt.Sprintf("/bug?id=%v", ctx.bug.key(ctx.ctx.ctx).StringID())
 }
 
 type treeTestEntry struct {

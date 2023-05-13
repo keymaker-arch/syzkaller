@@ -113,6 +113,7 @@ type Commit struct {
 	Recipients Recipients
 	BugIDs     []string // ID's extracted from Reported-by tags
 	Date       time.Time
+	Link       string // set if the commit is a part of a reply
 }
 
 func (dash *Dashboard) UploadBuild(build *Build) error {
@@ -219,10 +220,11 @@ const (
 type JobDoneFlags int64
 
 const (
-	BisectResultMerge   JobDoneFlags = 1 << iota // bisected to a merge commit
-	BisectResultNoop                             // commit does not affect resulting kernel binary
-	BisectResultRelease                          // commit is a kernel release
-	BisectResultIgnore                           // this particular commit should be ignored, see syz-ci/jobs.go
+	BisectResultMerge      JobDoneFlags = 1 << iota // bisected to a merge commit
+	BisectResultNoop                                // commit does not affect resulting kernel binary
+	BisectResultRelease                             // commit is a kernel release
+	BisectResultIgnore                              // this particular commit should be ignored, see syz-ci/jobs.go
+	BisectResultInfraError                          // the bisect failed due to an infrastructure problem
 )
 
 func (dash *Dashboard) JobPoll(req *JobPollReq) (*JobPollResp, error) {
@@ -831,6 +833,40 @@ const (
 	ReportBisectCause                   // Cause bisection result for an already reported bug.
 	ReportBisectFix                     // Fix bisection result for an already reported bug.
 )
+
+type JobInfo struct {
+	Type             JobType
+	Flags            JobDoneFlags
+	Created          time.Time
+	BugLink          string
+	ExternalLink     string
+	User             string
+	Reporting        string
+	Namespace        string
+	Manager          string
+	BugTitle         string
+	BugID            string
+	KernelAlias      string
+	KernelCommit     string
+	KernelCommitLink string
+	PatchLink        string
+	Attempts         int
+	Started          time.Time
+	Finished         time.Time
+	Duration         time.Duration
+	CrashTitle       string
+	CrashLogLink     string
+	CrashReportLink  string
+	LogLink          string
+	ErrorLink        string
+	ReproCLink       string
+	ReproSyzLink     string
+	Commit           *Commit   // for conclusive bisection
+	Commits          []*Commit // for inconclusive bisection
+	Reported         bool
+	TreeOrigin       bool
+	OnMergeBase      bool
+}
 
 func (dash *Dashboard) Query(method string, req, reply interface{}) error {
 	if dash.logger != nil {

@@ -848,7 +848,7 @@ func uploadFileGCS(URL string, file io.Reader) error {
 	if err := gcsWriter.Close(); err != nil {
 		return fmt.Errorf("failed to close gcs writer: %v", err)
 	}
-	return GCS.Publish(URL)
+	return nil
 }
 
 func uploadFileHTTPPut(URL string, file io.Reader) error {
@@ -870,7 +870,7 @@ func uploadFileHTTPPut(URL string, file io.Reader) error {
 
 // Errorf logs non-fatal error and sends it to dashboard.
 func (mgr *Manager) Errorf(msg string, args ...interface{}) {
-	log.Logf(0, mgr.name+": "+msg, args...)
+	log.Errorf(mgr.name+": "+msg, args...)
 	if mgr.dash != nil {
 		mgr.dash.LogError(mgr.name, msg, args...)
 	}
